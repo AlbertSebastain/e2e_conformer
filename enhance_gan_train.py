@@ -12,6 +12,8 @@ from tqdm import tqdm
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import fake_opt
+from rewav import rewav
 
 from options.train_options import TrainOptions
 from model.enhance_model import EnhanceModel
@@ -34,13 +36,17 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     torch.set_grad_enabled(False)
     enhance_cmvn_file = os.path.join(opt.exp_path, 'enhance_cmvn.npy')
     for i, (data) in enumerate(train_loader, start=0):
-        utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
-        enhance_out = enhance_model.enhance_out(mix_inputs, mix_log_inputs, input_sizes) 
-        enhance_cmvn = feat_model.compute_cmvn(enhance_out, input_sizes)
-        if enhance_cmvn is not None:
-            np.save(enhance_cmvn_file, enhance_cmvn)
-            print('save enhance_cmvn to {}'.format(enhance_cmvn_file))
+        utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,_,_,_ = data
+        enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes)
+        if os.path.isfile(enhance_cmvn_file):
+            enhance_cmvn = np.load(enhance_cmvn_file)
             break
+        else:
+            enhance_cmvn = feat_model.compute_cmvn(enhance_out, input_sizes)
+            if enhance_cmvn is not None:
+                np.save(enhance_cmvn_file, enhance_cmvn)
+                print('save enhance_cmvn to {}'.format(enhance_cmvn_file))
+                break
     enhance_cmvn = torch.FloatTensor(enhance_cmvn)
     enhance_model.train()
     feat_model.train()
@@ -49,17 +55,21 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     
          
 def main():    
-    opt = TrainOptions().parse()    
+    opt = TrainOptions().parse()   
+    if opt.exp_path == None:
+        opt = fake_opt.Enhance_gan_train()
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
  
     visualizer = Visualizer(opt)  
     logging = visualizer.get_logger()
     loss_report = visualizer.add_plot_report(['train/loss', 'val/loss', 'train/gan_loss', 'train/enhance_loss','train/loss_D'], 'loss.png')
-
+    save_wav_path = os.path.join(opt.checkpoints_dir,opt.name,'att_ws')
     # data
     logging.info("Building dataset.")
-    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'train'), os.path.join(opt.dict_dir, 'train_units.txt'),) 
-    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'dev'), os.path.join(opt.dict_dir, 'train_units.txt'),)
+    train_data ='train'
+    dev_data = 'dev'
+    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_data) 
+    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, dev_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_data)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
     train_loader = MixSequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     val_loader = MixSequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
@@ -78,8 +88,8 @@ def main():
     best_loss = opt.best_loss  
     start_epoch = opt.start_epoch      
     model_path = None
-    if opt.enhace_resume:
-        model_path = os.path.join(opt.works_dir, opt.enhace_resume)
+    if opt.enhance_resume:
+        model_path = os.path.join(opt.works_dir, opt.enhance_resume)
         if os.path.isfile(model_path):
             package = torch.load(model_path, map_location=lambda storage, loc: storage)
             lr = package.get('lr', opt.lr)
@@ -121,8 +131,8 @@ def main():
             print("Shuffling batches for the following epochs")
             train_sampler.shuffle(epoch)                             
         for i, (data) in enumerate(train_loader, start=(iters % len(train_dataset))):
-            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
-            enhance_loss, enhance_out = enhance_model(clean_inputs, mix_inputs, mix_log_inputs, cos_angles, input_sizes) 
+            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,_,_,_ = data
+            enhance_loss, enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes, clean_inputs, cos_angles) 
             enhance_feat = feat_model(enhance_out, enhance_cmvn)
             clean_feat = feat_model(clean_inputs, enhance_cmvn)
             set_requires_grad([gan_model], False)
@@ -173,27 +183,36 @@ def main():
                 torch.set_grad_enabled(False)                
                 num_saved_specgram = 0 
                 for i, (data) in tqdm(enumerate(val_loader, start=0)):
-                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
-                    loss, enhance_out = enhance_model(clean_inputs, mix_inputs, mix_log_inputs, cos_angles, input_sizes)                 
+                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,clean_angles,mix_angles,cmvn = data
+                    loss, enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes, clean_inputs, cos_angles)                 
                     errors = {'val/loss': loss.item()}
                     visualizer.set_current_errors(errors)
-                
                     if opt.num_saved_specgram > 0:
                         if num_saved_specgram < opt.num_saved_specgram:
                             enhanced_outs = enhance_model.calculate_all_specgram(mix_inputs, mix_log_inputs, input_sizes)
                             for x in range(len(utt_ids)):
                                 enhanced_out = enhanced_outs[x].data.cpu().numpy()
                                 enhanced_out[enhanced_out <= 1e-7] = 1e-7
+                                enhance_out_orig = enhanced_out
                                 enhanced_out = np.log10(enhanced_out)
                                 clean_input = clean_inputs[x].data.cpu().numpy()
                                 clean_input[clean_input <= 1e-7] = 1e-7
+                                clean_input_orig = clean_input
                                 clean_input = np.log10(clean_input)
                                 mix_input = mix_inputs[x].data.cpu().numpy()
                                 mix_input[mix_input <= 1e-7] = 1e-7
                                 mix_input = np.log10(mix_input)
                                 utt_id = utt_ids[x]
-                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
                                 input_size = int(input_sizes[x])
+                                wav_name_clean = "{}_ep{}_it{}_clean.wav".format(utt_id, epoch, iters)
+                                wav_name_enhance = "{}_ep{}_it{}_mix.wav".format(utt_id, epoch, iters) 
+                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
+                                clean_angle = clean_angles[x].data.cpu().numpy()
+                                mix_angle = mix_angles[x].data.cpu().numpy()
+                                rewav(save_wav_path,utt_id,clean_input_orig,clean_angle,input_size = input_size,wav_file = wav_name_clean)
+                                rewav(save_wav_path,utt_id,enhance_out_orig,mix_angle,input_size = input_size,wav_file = wav_name_enhance)
+                                
+                                #input_size = int(input_sizes[x])
                                 visualizer.plot_specgram(clean_input, mix_input, enhanced_out, input_size, file_name)
                                 num_saved_specgram += 1
                                 if num_saved_specgram >= opt.num_saved_specgram:
@@ -210,7 +229,7 @@ def main():
                 filename = None
                 if val_loss > best_loss:
                     print('val_loss {} > best_loss {}'.format(val_loss, best_loss))
-                    opt.eps = utils.adadelta_eps_decay(optimizer, opt.eps_decay)
+                    opt.eps = utils.adadelta_eps_decay(gan_optimizer, opt.eps_decay)
                 else:
                     filename='model.loss.best'                 
                 best_loss = min(val_loss, best_loss)
