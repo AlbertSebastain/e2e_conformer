@@ -100,7 +100,11 @@ train_dev=dev
 ##recog_set="test_mix test_clean"
 ##recog_set="test_clean_small"
 recog_set="test"
-
+test_set="test"
+dev_set='dev'
+train_file=${dataroot}/${train_set}
+test_file=${dataroot}/${test_set}
+dev_file=${dataroot}/${dev_set} 
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
 dict=${dictroot}/${train_set}_units.txt
 embed_init_file=${dictroot}/sgns
@@ -108,48 +112,63 @@ echo "dictionary: ${dict}"
 nlsyms=${dictroot}/silence.txt
 lmexpdir=checkpoints1/train_${lmtype}_2layer_${input_unit_lm}_${hidden_unit_lm}_drop${dropout_lm}_bs${batchsize_lm}
 mkdir -p ${lmexpdir}
+# 把分词删除，变成一句
+for x in train dev test; do
+    cp ${dataroot}/${x}/text ${dataroot}/${x}/text.org
+    paste -d " " <(cut -f 1 -d" " ${dataroot}/${x}/text.org) <(cut -f 2- -d" " ${dataroot}/${x}/text.org | tr -d " ") \
+        > ${dataroot}/${x}/text
+    cp ${dataroot}/${x}/text ${dataroot}/${x}/text_char
+    cp ${dataroot}/${x}/text ${dataroot}/${x}/text_word
+    #rm data/${x}/text.org
+    done
+echo "make a dictionary"
+echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
+text2token.py -s 1 -n 1 ${dataroot}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
+| sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+wc -l ${dict}
 if [ ${stage} -le 3 ]; then
 
     echo "stage 3: LM Preparation"
+
     lmdatadir=${lmexpdir}/local/lm_train
     mkdir -p ${lmdatadir}
 
-    text2token.py -s 1 -n 1 -l ${nlsyms}  ${dataroot}/train/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+    text2token.py -s 1 -n 1 -l ${nlsyms} --space "" ${dataroot}/train/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
         > ${lmdatadir}/train_trans.txt
 
     cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
-    text2token.py -s 1 -n 1 -l ${nlsyms}  ${dataroot}/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+    text2token.py -s 1 -n 1 -l  ${nlsyms} --space ""  ${dataroot}/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
         > ${lmdatadir}/valid.txt
-    text2token.py -s 1 -n 1 -l ${nlsyms} --space "" ${dataroot}/train/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-        > ${lmdatadir}/train_trans_char.txt
-    cat ${lmdatadir}/train_trans_char.txt | tr '\n' ' ' > ${lmdatadir}/train_char.txt
-    text2token.py -s 1 -n 1 --space "" -l ${nlsyms}  ${dataroot}/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-        > ${lmdatadir}/valid_char.txt
+    # text2token.py -s 1 -n 1 -l ${nlsyms} --space "" ${dataroot}/train/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+    #     > ${lmdatadir}/train_trans_char.txt
+    # cat ${lmdatadir}/train_trans_char.txt | tr '\n' ' ' > ${lmdatadir}/train_char.txt
+    # text2token.py -s 1 -n 1 --space "" -l ${nlsyms}  ${dataroot}/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+    #     > ${lmdatadir}/valid_char.txt
 
-    echo "================="
-    echo "build dic"
-    echo "================"
-    python3 utils/build_vocab.py ${lmdatadir}/train_trans.txt 0 ${dict}
-    echo "${dict}"
-    # use only 1 gpu
-    if [ ${ngpu} -gt 1 ]; then
-       echo "LM training does not support multi-gpu. signle gpu will be used."
-    fi
+    #  echo "================="
+    #  echo "build dic"
+    #  echo "================"
+    #  python3 utils/build_vocab.py ${dataroot}/train/text 0 ${dict} "char"
+    #  echo "${dict}"
+#     # use only 1 gpu
+     if [ ${ngpu} -gt 1 ]; then
+        echo "LM training does not support multi-gpu. signle gpu will be used."
+     fi
     
-        ${cuda_cmd} ${lmexpdir}/train.log \
-        python3 lm_train.py \
-        --ngpu 1 \
-        --input-unit ${input_unit_lm} \
-        --lm-type ${lmtype} \
-        --unit ${hidden_unit_lm} \
-        --dropout-rate ${dropout_lm} \
-        --embed-init-file ${embed_init_file} \
-        --verbose 1 \
-        --batchsize ${batchsize_lm} \
-        --outdir ${lmexpdir} \
-        --train-label ${lmdatadir}/train_char.txt \
-        --valid-label ${lmdatadir}/valid_char.txt \
-        --dict ${dict}
+         ${cuda_cmd} ${lmexpdir}/train.log \
+         python3 lm_train.py \
+         --ngpu 1 \
+         --input-unit ${input_unit_lm} \
+         --lm-type ${lmtype} \
+         --unit ${hidden_unit_lm} \
+         --dropout-rate ${dropout_lm} \
+         --embed-init-file ${embed_init_file} \
+         --verbose 1 \
+         --batchsize ${batchsize_lm} \
+         --outdir ${lmexpdir} \
+         --train-label ${lmdatadir}/train.txt \
+         --valid-label ${lmdatadir}/valid.txt \
+         --dict ${dict}
     
 
 fi

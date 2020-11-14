@@ -11,6 +11,8 @@ from tqdm import tqdm
 import json
 import logging
 import torch
+import fake_opt
+from rewav import rewav
 
 from options.test_options import TestOptions
 from model.feat_model import FFTModel, FbankModel
@@ -19,10 +21,13 @@ from model.enhance_model import EnhanceModel
 from model import lm, extlm, fsrnn
 from model.fstlm import NgramFstLM
 from data.data_loader import SequentialDataset, SequentialDataLoader, BucketingSampler
+from data.mix_data_loader import MixSequentialDataset, MixSequentialDataLoader, BucketingSampler
 from utils.visualizer import Visualizer 
-from utils import utils 
+from utils import utils
 
 opt = TestOptions().parse()
+if opt.recog_dir == '':
+    opt = fake_opt.joint_recog()
 manualSeed = random.randint(1, 10000)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
@@ -42,30 +47,45 @@ else:
     
 # data
 logging.info("Building dataset.")
-recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),) 
+type_data = opt.recog_data
+recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),type_data,'mix') 
+#recog_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, type_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data)
 recog_loader = SequentialDataLoader(recog_dataset, batch_size=1, num_workers=opt.num_workers, shuffle=False)
+#recog_loader = MixSequentialDataLoader(recog_dataset, batch_size=1, num_workers=opt.num_workers, shuffle=False)
 opt.idim = recog_dataset.get_feat_size()
 opt.odim = recog_dataset.get_num_classes()
 opt.char_list = recog_dataset.get_char_list()
 opt.labeldist = recog_dataset.get_labeldist()
 print('#input dims : ' + str(opt.idim))
 print('#output dims: ' + str(opt.odim))
-logging.info("Dataset ready!")
+logging.info(len(opt.char_list))
+logging.info("Dataset ready!") 
+logging.info("dataset from:" + opt.recog_dir)
 
                                               
 def main():
     
     # Setup a model      
-    model_path = None
-    if opt.resume:
-        model_path = os.path.join(opt.works_dir, opt.resume)
-        if os.path.isfile(model_path):
-            package = torch.load(model_path, map_location=lambda storage, loc: storage)
-            enhance_model = EnhanceModel.load_model(model_path, 'enhance_state_dict', opt)   
-            feat_model = FbankModel.load_model(model_path, 'fbank_state_dict', opt) 
-            asr_model = E2E.load_model(model_path, 'asr_state_dict', opt)         
+    model_path_enhance = None
+    model_path_e2e = None
+    if (opt.enhance_resume != '') & (opt.e2e_resume != ''):
+        model_path_enhance = os.path.join(opt.works_dir, opt.enhance_resume)
+        model_path_e2e = os.path.join(opt.works_dir,opt.e2e_resume)
+        if os.path.isfile(model_path_enhance) & os.path.isfile(model_path_e2e):
+            package = torch.load(model_path_enhance, map_location=lambda storage, loc: storage)
+            enhance_model = EnhanceModel.load_model(model_path_enhance, 'enhance_state_dict', opt)   
+            feat_model = FbankModel.load_model(model_path_enhance, 'fbank_state_dict', opt) 
+            #asr_model = E2E.load_model(model_path, 'asr_state_dict', opt)       
+            asr_model = asr_model = E2E.load_model(model_path_e2e, 'asr_state_dict', opt)
         else:
             raise Exception("no checkpoint found at {}".format(opt.resume))
+    elif opt.joint_resume != '':
+        model_path_joint = os.path.join(opt.works_dir, opt.joint_resume)
+        package = torch.load(model_path_joint, map_location=lambda storage, loc: storage)
+        enhance_model = EnhanceModel.load_model(model_path_joint, 'enhance_state_dict', opt)   
+        feat_model = FbankModel.load_model(model_path_joint, 'fbank_state_dict', opt) 
+        #asr_model = E2E.load_model(model_path, 'asr_state_dict', opt)       
+        asr_model = asr_model = E2E.load_model(model_path_joint, 'asr_state_dict', opt)
     else:
         raise Exception("no checkpoint found at {}".format(opt.resume))
         
@@ -75,8 +95,22 @@ def main():
     if opt.lmtype == 'rnnlm':         
         # read rnnlm
         if opt.rnnlm:
-            rnnlm = lm.ClassifierWithState(
-                lm.RNNLM(len(opt.char_list), 650, 650))
+            if opt.embed_init_file is not None:
+                word_dim = 0 
+                with open(opt.embed_init_file, 'r', encoding='utf-8') as fid:
+                    for line in fid:
+                        line_splits = line.strip().split()               
+                        word_dim = len(line_splits[1:])
+                        break          
+                shape = (len(opt.char_list), word_dim)
+                scale = 0.05
+                embed_vecs_init = np.array(np.random.uniform(low=-scale, high=scale, size=shape), dtype=np.float32)
+                rnnlm = lm.ClassifierWithState(
+                    lm.RNNLM(len(opt.char_list), word_dim, 650,embed_vecs_init = embed_vecs_init))   
+            else:
+                embed_vecs_init = None
+                rnnlm = lm.ClassifierWithState(
+                    lm.RNNLM(len(opt.char_list), 650, 650))
             rnnlm.load_state_dict(torch.load(opt.rnnlm, map_location=cpu_loader))
             if len(opt.gpu_ids) > 0: 
                 rnnlm = rnnlm.cuda()     
@@ -140,12 +174,29 @@ def main():
             
     torch.set_grad_enabled(False)
     new_json = {}
+    cmvn_path = os.path.join(opt.exp_path,'joint_train','enhance_cmvn.npy')
+    enhance_cmvn = np.load(cmvn_path)
+    enhance_cmvn = torch.FloatTensor(enhance_cmvn)
     for i, (data) in enumerate(recog_loader, start=0):
         utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
+        #utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs,mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, clean_angles, mix_angles, cmvn = data
         name = utt_ids[0]
+        #inputs = mix_inputs
+        #log_inputs = mix_log_inputs
         print(name)
         enhance_outputs = enhance_model(inputs, log_inputs, input_sizes)
-        feats = feat_model(enhance_outputs, fbank_cmvn)        
+        logging.info(inputs[0,0,1:10])
+        logging.info(log_inputs[0,0,1:10])
+        rewav_type = None
+        if rewav_type == True:
+            path = '/usr/home/shi/projects/data_aishell/data/wavfile/initial'
+            rewav(path,name,inputs[0],mix_angles[0],type_wav = 'initial')
+            rewav(path,name,enhance_outputs[0],mix_angles[0],type_wav = 'enhance')
+        feats = feat_model(enhance_outputs, fbank_cmvn) 
+        print(feats)
+        #logging.info(inputs[0,0,1:10])
+        #logging.info(enhance_outputs[0,0,1:10])   
+        #feats = feat_model(clean_inputs,fbank_cmvn)
         nbest_hyps = asr_model.recognize(feats, opt, opt.char_list, rnnlm=rnnlm, fstlm=fstlm)
         # get 1best and remove sos
         y_hat = nbest_hyps[0]['yseq'][1:]

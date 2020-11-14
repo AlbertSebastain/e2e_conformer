@@ -107,10 +107,25 @@ def read_target_file(model_unit, target_path, char_list, map_oov=1):
                 space_token = []
                 for word_num in range(1, len(split_line)):
                     word = split_line[word_num]
-                    token_tmp = [char_dict[x] if x in char_dict else map_oov for x in word]                                     
-                    token.extend(token_tmp) 
-                    space_token_tmp = [0] * (len(word) - 1) + [1]  
-                    space_token.extend(space_token_tmp)  
+                    if word in char_dict:
+                        token_tmp = [char_dict[word]]
+                        space_token_tmp = [0] * (len(word) - 1) + [1] 
+                        token.extend(token_tmp)
+                        space_token.extend(space_token_tmp)
+                    else:
+                        for char_load in word:
+                            if char_load in char_dict:
+                                token_tmp = [char_dict[char_load]]
+                            else:
+                                token_tmp = [map_oov]
+                            token.extend(token_tmp)
+                            space_token_tmp = [1]
+                            space_token.extend(space_token_tmp)  
+                    #token_tmp = [char_dict[x] if x in char_dict else map_oov for x in word]                                     
+                    #token.extend(token_tmp) 
+                    # 一个word有几个字母，有3个字母，那变成001
+                    #space_token_tmp = [0] * (len(word) - 1) + [1]  
+                    #space_token.extend(space_token_tmp)  
             if len(token) > 0:
                 for x in token:
                     labelcount[x] += 1

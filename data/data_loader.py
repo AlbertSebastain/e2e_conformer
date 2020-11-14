@@ -8,12 +8,13 @@ from collections import defaultdict
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
+from progressbar import *
 
 from data.audioparse import FbankFeatLabelParser
 
 
 class SequentialDataset(Dataset, FbankFeatLabelParser):
-    def __init__(self, args, data_dir, dict_file):
+    def __init__(self, args, data_dir, dict_file, type_data, noise_level = 'clean',mct = False):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -26,8 +27,10 @@ class SequentialDataset(Dataset, FbankFeatLabelParser):
         """
         self.args = args
         self.exp_path = args.exp_path
-        
+        self.type_data = type_data
         self.feat_type = args.feat_type
+        self.noise_level = noise_level
+        self.mct = mct
         if self.feat_type.split('_')[0] == 'kaldi':
             self.speech_scp = os.path.join(data_dir, 'feats.scp')
             self.feat_len_scp = os.path.join(data_dir, 'kaldi_feat_len.scp')
@@ -102,8 +105,11 @@ class SequentialDataset(Dataset, FbankFeatLabelParser):
     
     def loading_feat_len(self, feats_scp, out_scp):
         print('load feat_len from {} to {}'.format(feats_scp, out_scp))
+        num_lines = sum(1 for line in open(feats_scp,'r'))
         fwrite = open(out_scp, 'w')
         with open(feats_scp, 'r') as fid:
+            progress = ProgressBar().start()
+            nn = 0
             for line in fid:
                 line_splits = line.strip().split()
                 utt_id = line_splits[0] 
@@ -114,17 +120,30 @@ class SequentialDataset(Dataset, FbankFeatLabelParser):
                     else:
                         speech_wav = self.WaveData(wav_path)
                         in_feat = self.extract_feat(speech_wav, feat_type=self.feat_type)                             
-                    fwrite.write(utt_id + ' ' + str(in_feat.shape[0]) + '\n')  
+                    fwrite.write(utt_id + ' ' + str(in_feat.shape[0]) + '\n') 
+                    nn = nn+1 
+                    progress.update(int((nn/num_lines)*100)) 
                 except:
-                    print(line, 'error')                               
+                    print(line, 'error')  
+            progress.finish()                                
         fwrite.close()
 
     def loading_cmvn(self):
         if not os.path.isdir(self.exp_path):
             raise Exception(self.exp_path + ' isn.t a path!')
-        cmvn_file = os.path.join(self.exp_path, 'cmvn.npy')
-        if os.path.exists(cmvn_file):
-            cmvn = np.load(cmvn_file)
+        if self.mct == True:
+            mctl = '_mct'
+        else:
+            mctl = ''
+        cmvn_name = self.type_data+'_'+self.noise_level+mctl+'_cmvn.npy'
+        cmvn_file = os.path.join(self.exp_path, cmvn_name)
+        cmvn_file_a = os.path.abspath(os.path.join(self.exp_path,'..'))
+        cmvn_file_a = os.path.join(cmvn_file_a,cmvn_name)
+        if os.path.exists(cmvn_file) | os.path.exists(cmvn_file_a):
+            if os.path.exists(cmvn_file):
+                cmvn = np.load(cmvn_file)
+            else:
+                cmvn = np.load(cmvn_file_a)
             if cmvn.shape[1] == self.feat_size:
                 print('load cmvn from {}'.format(cmvn_file))
             else:

@@ -20,7 +20,7 @@ do_delta=false # true when using CNN
 # network archtecture
 # encoder related
 etype=vggblstmp     # encoder architecture type
-elayers=8
+elayers=4
 eunits=320
 eprojs=320
 subsample=1_2_2_1_1 # skip every n frame from input to nth layers
@@ -96,8 +96,6 @@ dataroot="/usr/home/shi/projects/data_aishell/data"
 dictroot="/usr/home/shi/projects/data_aishell/data/lang/phones"
 train_set=train
 train_dev=dev
-##recog_set="test_mix test_clean"
-##recog_set="test_clean_small"
 recog_set="test"
 
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
@@ -105,7 +103,8 @@ dict=${dictroot}/${train_set}_units.txt
 embed_init_file=${dictroot}/sgns
 echo "dictionary: ${dict}"
 nlsyms=${dictroot}/non_lang_syms.txt
-lmexpdir=checkpoints/train_${lmtype}_2layer_${input_unit_lm}_${hidden_unit_lm}_drop${dropout_lm}_bs${batchsize_lm}
+#lmexpdir=checkpoints/train_${lmtype}_2layer_${input_unit_lm}_${hidden_unit_lm}_drop${dropout_lm}_bs${batchsize_lm}
+lmexpdir=checkpoints_new/train_rnnlm
 mkdir -p ${lmexpdir}
 if [ ${stage} -le 3 ]; then
     echo "stage 3: LM Preparation"
@@ -141,11 +140,9 @@ fi
 
 
 #name=aishell_${model_unit}_${etype}_e${elayers}_subsample${subsample}_${subsample_type}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_${aact_func}_aconvc${aconv_chans}_aconvf${aconv_filts}_lsm_type${lsm_type}_lsm_weight${lsm_weight}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}_dropout${dropout_rate}_fusion${fusion}
-name="aishell_char_vggblstmp_e8_subsample1_2_2_1_1_skip_unit320_proj320_d1_unit300_location_softmax_aconvc10_aconvf100_lsm_typenone_lsm_weight0.0_num_save_attention0.5_adadelta_bs30_mli800_mlo150_dropout0.0_fusionnone"
-##name=aishell_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}  --resume $resume \
+#name="aishell_char_vggblstmp_e8_subsample1_2_2_1_1_skip_unit320_proj320_d1_unit300_lr0.02_location_softmax_aconvc10_aconvf100_lsm_typenone_lsm_weight0.0_num_save_attention0.5_adadelta_bs30_mli800_mlo150_dropout0.0_fusionnone"
 
-#lmexpdir=checkpoints/train_fsrnnlm_2layer_256_650_drop0.5_bs64
-    
+
 if [ ${stage} -le 4 ]; then
     echo "stage 4: Network Training"
     python3 asr_train.py \
@@ -177,21 +174,20 @@ if [ ${stage} -le 4 ]; then
     --fusion ${fusion} \
     --epochs ${epochs}
 fi
-
-#expdir=checkpoints/asr_clean_syllable_fbank80_drop0.2/
-expdir="/usr/home/shi/projects/e2e_speech_project/playground"
-name=asr_clean_syllable_fbank80_drop0.2
-#lmexpdir=checkpoints/train_rnnlm_2layer_256_650_drop0.5_bs64
+expdir="/usr/home/shi/projects/e2e_speech_project/data_model"
 fst_path="/home/bliu/mywork/workspace/e2e/data/lang_word/LG_pushed_withsyms.fst"
 nn_char_map_file="/usr/home/shi/projects/data_aishell/dev/tex_cha"
+save_dir="/usr/home/shi/projects/e2e_speech_project/checkpoints_new"
+decode_dir=decode_clean
+name=${save_dir}/${decode_dir}
 if [ ${stage} -le 5 ]; then
     #echo "stage 5: Decoding"
     nj=8
     for rtask in ${recog_set}; do
     ##(
-        decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}_${lmtype}${lm_weight}
+        #decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}_${lmtype}${lm_weight}_10_15_20
+       
         feat_recog_dir=${dataroot}/${rtask}
-        echo ${feat_recog_dir}
         #./utils/fix_data_dir.sh ${feat_recog_dir}
         # split data
         #splitjson.py --parts ${nj} ${feat_recog_dir}/data.json  --kenlm ${dictroot}/text.arpa \
@@ -205,35 +201,39 @@ if [ ${stage} -le 5 ]; then
         echo $nj > ${expdir}/num_jobs
 
         #### use CPU for decoding  ##& ##${decode_cmd} JOB=1 ${expdir}/${decode_dir}/log/decode.JOB.log \
+       ${decode_cmd} JOB=1:${nj} ${save_dir}/${decode_dir}/log/decode.JOB.log \
+           python3 asr_recog.py \
+           --dataroot ${dataroot} \
+           --dict_dir ${dictroot} \
+           --name $name \
+          --model-unit $model_unit \
+           --nj $nj \
+           --gpu_ids 0 \
+           --nbest $nbest \
+           --resume ${expdir}/asr_model/model.acc.best \
+           --recog-dir ${sdata}/JOB/ \
+           --result-label ${save_dir}/${decode_dir}/data.JOB.json \
+           --beam-size ${beam_size} \
+           --penalty ${penalty} \
+           --maxlenratio ${maxlenratio} \
+           --minlenratio ${minlenratio} \
+           --ctc-weight ${ctc_weight} \
+           --lmtype ${lmtype} \
+           --verbose ${verbose} \
+           --normalize_type 1 \
+           --fbank_dim 80 \
+           --rnnlm ${lmexpdir}/rnnlm.model.best \
+           --lm-weight ${lm_weight} \
+           --embed-init-file ${embed_init_file} \
+           --exp_path ${expdir}
+            #--fstlm-path ${fst_path} \
+            #--nn-char-map-file ${nn_char_map_file} \
 
-        ${decode_cmd} JOB=1:${nj} ${expdir}/${decode_dir}/log/decode.JOB.log \
-            python3 asr_recog.py \
-            --dataroot ${dataroot} \
-            --name $name \
-            --model-unit $model_unit \
-            --nj $nj \
-            --gpu_ids 0 \
-            --nbest $nbest \
-            --resume ${expdir}/model.acc.best \
-            --recog-dir ${sdata}/JOB/ \
-            --result-label ${expdir}/${decode_dir}/data.JOB.json \
-            --beam-size ${beam_size} \
-            --penalty ${penalty} \
-            --maxlenratio ${maxlenratio} \
-            --minlenratio ${minlenratio} \
-            --ctc-weight ${ctc_weight} \
-            --lmtype ${lmtype} \
-            --verbose ${verbose} \
-            --normalize_type 0 \
-            --rnnlm ${lmexpdir}/rnnlm.model.best \
-            --lm-weight ${lm_weight} \
-            --embed-init-file  ${embed_init_file} \
-            --dict_dir ${dictroot} 
 
             #--fstlm-path ${fst_path} \
             #--nn-char-map-file ${nn_char_map_file} \
           
-        score_sclite.sh --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        score_sclite.sh --nlsyms ${nlsyms} ${save_dir}/${decode_dir} ${dict}
         
         ##kenlm_path="/home/bliu/mywork/workspace/e2e/src/kenlm/build/text_character.arpa"
         ##rescore_sclite.sh --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${expdir}/${decode_dir}_rescore ${dict} ${kenlm_path}

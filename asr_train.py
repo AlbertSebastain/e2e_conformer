@@ -38,12 +38,12 @@ def main():
     logging = visualizer.get_logger()
     acc_report = visualizer.add_plot_report(['train/acc', 'val/acc'], 'acc.png')
     loss_report = visualizer.add_plot_report(['train/loss', 'val/loss'], 'loss.png')
-    train_fold = 'train'
-    dev_fold = 'test'
+    train_fold = opt.train_folder
+    dev_fold = opt.dev_folder
     # data
     logging.info("Building dataset.")
-    train_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, train_fold), os.path.join(opt.dict_dir, 'train_units.txt'),) 
-    val_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, dev_fold), os.path.join(opt.dict_dir, 'train_units.txt'),)    
+    train_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, train_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'train',mct = opt.MCT) 
+    val_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, dev_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'dev',mct = opt.MCT)    
     train_sampler = BucketingSampler(train_dataset,batch_size = opt.batch_size)
     train_loader = SequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     val_loader = SequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
@@ -58,6 +58,7 @@ def main():
     # Setup a model
     asr_model = E2E(opt)
     fbank_model = FbankModel(opt)
+
     lr = opt.lr
     eps = opt.eps
     iters = opt.iters
@@ -101,8 +102,10 @@ def main():
     fbank_model.train()    
     sample_rampup = utils.ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)  
     sche_samp_rate = sample_rampup.update(iters)
-    
-    fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
+    if opt.MCT == True:
+        fbank_cmvn_file = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
+    else:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
     # data 不存在 input_sizes output_sizes, 不能load。 在后面计算cmvn需要用到，没法用。fbank_cmvn 不存在，需要建立，但是之前在数据sequen 时计算的cmvn 为什么不能用
     # train 和test 都存在 /exp_path 叫 cmvn.npy 会不会覆盖。 text_char存哪个
     # 原先注释
@@ -195,7 +198,7 @@ def main():
                 val_loss = visualizer.get_current_errors('val/loss')
                 val_acc = visualizer.get_current_errors('val/acc')  
                 filename = None              
-                if opt.criterion == 'acc' and opt.mtl_mode is not 'ctc':
+                if opt.criterion == 'acc' and opt.mtl_mode != 'ctc':
                     if val_acc < best_acc:
                         logging.info('val_acc {} > best_acc {}'.format(val_acc, best_acc))
                         opt.eps = utils.adadelta_eps_decay(optimizer, opt.eps_decay)

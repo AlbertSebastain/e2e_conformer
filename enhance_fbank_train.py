@@ -11,7 +11,9 @@ from tqdm import tqdm
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import fake_opt
 
+from rewav import rewav
 from options.train_options import TrainOptions
 from model.enhance_model import EnhanceModel
 from model.feat_model import FFTModel, FbankModel
@@ -25,7 +27,7 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     torch.set_grad_enabled(False)
     enhance_cmvn_file = os.path.join(opt.exp_path, 'enhance_cmvn.npy')
     for i, (data) in enumerate(train_loader, start=0):
-        utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+        utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,mix_angles,clean_angels,cmvn = data
         enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes) 
         enhance_cmvn = feat_model.compute_cmvn(enhance_out, input_sizes)
         if enhance_cmvn is not None:
@@ -45,7 +47,8 @@ torch.cuda.manual_seed(manualSeed)
  
 def main():
     
-    opt = TrainOptions().parse()    
+    # opt = TrainOptions().parse() 
+    opt = fake_opt.Enhance_base_fbank_train()   
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
  
     visualizer = Visualizer(opt)  
@@ -54,8 +57,10 @@ def main():
 
     # data
     logging.info("Building dataset.")
-    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'train'), os.path.join(opt.dict_dir, 'train_units.txt'),) 
-    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'dev'), os.path.join(opt.dict_dir, 'train_units.txt'),)
+    train_set = 'train'
+    dev_set = 'dev'
+    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_set), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_set) 
+    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, dev_set), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_set)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
     train_loader = MixSequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     val_loader = MixSequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
@@ -66,6 +71,7 @@ def main():
     logging.info('#input dims : ' + str(opt.idim))
     logging.info('#output dims: ' + str(opt.odim))
     logging.info("Dataset ready!")
+    save_wav_path = os.path.join(opt.checkpoints_dir,opt.name,'att_ws')
   	
     lr = opt.lr
     eps = opt.eps
@@ -98,7 +104,7 @@ def main():
         enhance_optimizer = torch.optim.Adam(enhance_parameters, lr=opt.lr, betas=(opt.beta1, 0.999)) 
             
     # Training		    
-    ##enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)  
+    #enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)  
     enhance_model.train()
     feat_model.train()               
     for epoch in range(start_epoch, opt.epochs):        
@@ -106,7 +112,7 @@ def main():
             print("Shuffling batches for the following epochs")
             train_sampler.shuffle(epoch)   
         for i, (data) in enumerate(train_loader, start=(iters % len(train_dataset))):
-            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, mix_angles, clean_agles, cmvn = data
             if opt.enhance_type == 'unet_128' or opt.enhance_type == 'unet_256':
                 t_step = int(clean_inputs.size(1))
                 if t_step % 4 != 0:
@@ -116,6 +122,10 @@ def main():
                     mix_log_inputs = mix_log_inputs[:, :t_step, :] 
                 mix_log_inputs = mix_log_inputs.unsqueeze(1)                
             enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes) 
+            fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
+            if os.path.exists(fbank_cmvn_file):
+                fbank_cmvn = np.load(fbank_cmvn_file)
+                fbank_cmvn = torch.FloatTensor(fbank_cmvn)
             enhance_feat = feat_model(enhance_out)
             clean_feat = feat_model(clean_inputs)
             if opt.enhance_loss_type == 'L2':
@@ -150,7 +160,7 @@ def main():
                 torch.set_grad_enabled(False)
                 num_saved_specgram = 0
                 for i, (data) in tqdm(enumerate(val_loader, start=0)):
-                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, mix_angles, clean_angles, cmvn = data
                     if opt.enhance_type == 'unet_128' or opt.enhance_type == 'unet_256':
                         t_step = int(clean_inputs.size(1))
                         if t_step % 4 != 0:
@@ -177,16 +187,25 @@ def main():
                             for x in range(len(utt_ids)):
                                 enhanced_out = enhanced_outs[x].data.cpu().numpy()
                                 enhanced_out[enhanced_out <= 1e-7] = 1e-7
+                                enhance_out_orig = enhanced_out
                                 enhanced_out = np.log10(enhanced_out)
                                 clean_input = clean_inputs[x].data.cpu().numpy()
                                 clean_input[clean_input <= 1e-7] = 1e-7
                                 clean_input = np.log10(clean_input)
                                 mix_input = mix_inputs[x].data.cpu().numpy()
                                 mix_input[mix_input <= 1e-7] = 1e-7
+                                mix_input_orig = mix_input
                                 mix_input = np.log10(mix_input)
                                 utt_id = utt_ids[x]
-                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
                                 input_size = int(input_sizes[x])
+                                mix_angle = mix_angles[x].data.cpu().numpy()
+                                wav_name_mix = "{}_mix.wav".format(utt_id)
+                                if not os.path.isfile(os.path.join(save_wav_path,wav_name_mix)):
+                                    rewav(save_wav_path,utt_id,mix_input_orig,mix_angle,input_size = input_size,wav_file = wav_name_mix)
+                                wav_name_enhance = "{}_ep{}_it{}_enhance.wav".format(utt_id, epoch, iters) 
+                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
+                                rewav(save_wav_path,utt_id,enhance_out_orig,mix_angle,input_size = input_size,wav_file = wav_name_enhance)
+                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
                                 visualizer.plot_specgram(clean_input, mix_input, enhanced_out, input_size, file_name)
                                 num_saved_specgram += 1
                                 if num_saved_specgram >= opt.num_saved_specgram:
@@ -214,7 +233,7 @@ def main():
                 ##filename='epoch-{}_iters-{}_loss-{:.6f}-{:.6f}.pth'.format(epoch, iters, train_loss, val_loss)
                 utils.save_checkpoint(state, opt.exp_path, filename=filename)
                 visualizer.reset() 
-                ##enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)     
+                #enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)     
       
 if __name__ == '__main__':
     main()

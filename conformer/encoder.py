@@ -12,7 +12,7 @@ import torch
 
 from conformer.convolution import ConvolutionModule
 from conformer.encoder_layer import EncoderLayer
-from model.nets_utils import get_activation
+from transformer.nets_utils import get_activation
 from model.vgg2l import VGG2L
 from transformer.attention import (
     MultiHeadedAttention,  # noqa: H301

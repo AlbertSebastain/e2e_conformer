@@ -38,15 +38,11 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     for i, (data) in enumerate(train_loader, start=0):
         utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,_,_,_ = data
         enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes)
-        if os.path.isfile(enhance_cmvn_file):
-            enhance_cmvn = np.load(enhance_cmvn_file)
+        enhance_cmvn = feat_model.compute_cmvn(enhance_out, input_sizes)
+        if enhance_cmvn is not None:
+            np.save(enhance_cmvn_file, enhance_cmvn)
+            print('save enhance_cmvn to {}'.format(enhance_cmvn_file))
             break
-        else:
-            enhance_cmvn = feat_model.compute_cmvn(enhance_out, input_sizes)
-            if enhance_cmvn is not None:
-                np.save(enhance_cmvn_file, enhance_cmvn)
-                print('save enhance_cmvn to {}'.format(enhance_cmvn_file))
-                break
     enhance_cmvn = torch.FloatTensor(enhance_cmvn)
     enhance_model.train()
     feat_model.train()

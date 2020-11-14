@@ -20,31 +20,33 @@ from options.train_options import TrainOptions
 from model.enhance_model import EnhanceModel
 from data.mix_data_loader import MixSequentialDataset, MixSequentialDataLoader, BucketingSampler
 from utils.visualizer import Visualizer 
-from utils import utils 
+from utils import utils
+from rewav import rewav
 
 manualSeed = random.randint(1, 10000)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 torch.cuda.manual_seed(manualSeed) 
-def rewav(path,uttid,feats,ang,hop_length = 256,win_length = 512,window = scipy.signal.hamming,rate = 16000):
-    if isinstance(feats,torch.Tensor):
-        feats_numpy = feats.numpy()
-        ang_numpy = ang.numpy()
-    else:
-        feats_numpy = feats
-        ang_numpy = ang
-    feat_mat = feats_numpy*np.cos(ang_numpy)+1j*feats_numpy*np.sin(ang_numpy)
-    #feat_mat = feat_mat[feat_mat]
-    feat_mat = feat_mat.T
+# def rewav(path,uttid,feats,ang,hop_length = 256,win_length = 512,window = scipy.signal.hamming,rate = 16000):
+#     if isinstance(feats,torch.Tensor):
+#         feats_numpy = feats.numpy()
+#         ang_numpy = ang.numpy()
+#     else:
+#         feats_numpy = feats
+#         ang_numpy = ang
+#     feat_mat = feats_numpy*np.cos(ang_numpy)+1j*feats_numpy*np.sin(ang_numpy)
+#     #feat_mat = feat_mat[feat_mat]
+#     feat_mat = feat_mat.T
 
-    x = librosa.core.istft(feat_mat,hop_length = hop_length,win_length = win_length, window = window)
-    x = x*65535
-    path_wav = os.path.join(path,"remix_"+uttid+".wav")
-    scipy.io.wavfile.write(path_wav,rate,data = x)
+#     x = librosa.core.istft(feat_mat,hop_length = hop_length,win_length = win_length, window = window)
+#     x = x*65535
+#     path_wav = os.path.join(path,"remix_"+uttid+".wav")
+#     scipy.io.wavfile.write(path_wav,rate,data = x)
 def main():
     
-    #opt = TrainOptions().parse()  
-    opt = fake_opt.Enhance_base_train()  
+    opt = TrainOptions().parse()
+    if opt.exp_path == None:
+        opt = fake_opt.Enhance_base_train()  
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
  
     visualizer = Visualizer(opt)  
@@ -53,8 +55,10 @@ def main():
 
     # data
     logging.info("Building dataset.")
-    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'train'), os.path.join(opt.dict_dir, 'train_units.txt'),) 
-    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'dev'), os.path.join(opt.dict_dir, 'train_units.txt'),)
+    train_set = 'train'
+    val_set = 'dev'
+    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_set), os.path.join(opt.dict_dir, 'train_units.txt'),train_set) 
+    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, val_set), os.path.join(opt.dict_dir, 'train_units.txt'),val_set)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
     train_loader = MixSequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     val_loader = MixSequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
@@ -65,7 +69,8 @@ def main():
     logging.info('#input dims : ' + str(opt.idim))
     logging.info('#output dims: ' + str(opt.odim))
     logging.info("Dataset ready!")
-  	
+    save_wav_path = os.path.join(opt.checkpoints_dir,opt.name,'att_ws')
+    
     lr = opt.lr
     eps = opt.eps
     iters = opt.iters    
@@ -73,7 +78,7 @@ def main():
     start_epoch = opt.start_epoch      
     model_path = None
     if opt.enhance_resume:
-        model_path = os.path.join(opt.works_dir, opt.enhace_resume)
+        model_path = os.path.join(opt.works_dir, opt.enhance_resume)
         if os.path.isfile(model_path):
             package = torch.load(model_path, map_location=lambda storage, loc: storage)
             lr = package.get('lr', opt.lr)
@@ -83,7 +88,7 @@ def main():
             iters = int(package.get('iters', 0))            
             loss_report = package.get('loss_report', loss_report)
             visualizer.set_plot_report(loss_report, 'loss.png')
-            print('package found at {} and start_epoch {} iters {}',format(model_path, start_epoch, iters))
+            print('package found at {} and start_epoch {} iters {}'.format(model_path, start_epoch, iters))
         else:
             print("no checkpoint found at {}".format(model_path))     
     enhance_model = EnhanceModel.load_model(model_path, 'enhance_state_dict', opt)
@@ -94,20 +99,21 @@ def main():
         enhance_optimizer = torch.optim.Adadelta(enhance_parameters, rho=0.95, eps=opt.eps)
     elif opt.opt_type == 'adam':
         enhance_optimizer = torch.optim.Adam(enhance_parameters, lr=opt.lr, betas=(opt.beta1, 0.999)) 
-            
     # Training		                    
     for epoch in range(start_epoch, opt.epochs):
         enhance_model.train()
         if epoch > opt.shuffle_epoch:
             print("Shuffling batches for the following epochs")
-            train_sampler.shuffle(epoch)   
+            train_sampler.shuffle(epoch)  
+            print("finish")
         for i, (data) in enumerate(train_loader, start=(iters % len(train_dataset))):
-            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,mix_angles,clean_angles,cmvn = data
             utt_id = utt_ids[0]
-            clean_input = clean_inputs[0]
-            cos_angle = cos_angles[0]
-            path_wav = '/usr/home/shi/projects/data_aishell/data/wavfile'
-            rewav(path_wav,utt_id,clean_input,cos_angle)
+            # clean_input = clean_inputs[0].data
+            # cos_angle = cos_angles[0].data
+            # mix = mix_inputs[0].data
+            # path_wav = '/usr/home/shi/projects/data_aishell/data/wavfile'
+            # rewav(path_wav,utt_id,mix,cos_angle)
             loss, enhance_out = enhance_model( mix_inputs, mix_log_inputs, input_sizes,  clean_inputs,cos_angles) 
             enhance_optimizer.zero_grad()  # Clear the parameter gradients
             loss.backward()          
@@ -134,8 +140,8 @@ def main():
                 torch.set_grad_enabled(False)
                 num_saved_specgram = 0
                 for i, (data) in tqdm(enumerate(val_loader, start=0)):
-                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
-                    loss, enhance_out = enhance_model(clean_inputs, mix_inputs, mix_log_inputs, cos_angles, input_sizes)                 
+                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, clean_angles, mix_angles, cmvn = data
+                    loss, enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes, clean_inputs, cos_angles)                 
                     errors = {'val/loss': loss.item()}
                     visualizer.set_current_errors(errors)
                 
@@ -145,16 +151,26 @@ def main():
                             for x in range(len(utt_ids)):
                                 enhanced_out = enhanced_outs[x].data.cpu().numpy()
                                 enhanced_out[enhanced_out <= 1e-7] = 1e-7
+                                enhance_out_orig = enhanced_out
                                 enhanced_out = np.log10(enhanced_out)
                                 clean_input = clean_inputs[x].data.cpu().numpy()
                                 clean_input[clean_input <= 1e-7] = 1e-7
+                                clean_input_orig = clean_input
                                 clean_input = np.log10(clean_input)
                                 mix_input = mix_inputs[x].data.cpu().numpy()
                                 mix_input[mix_input <= 1e-7] = 1e-7
+                                mix_input_orig = mix_input
                                 mix_input = np.log10(mix_input)
                                 utt_id = utt_ids[x]
-                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
+                                mix_angle = mix_angles[x].data.cpu().numpy()
                                 input_size = int(input_sizes[x])
+                                wav_name_mix = "{}_mix.wav".format(utt_id)
+                                if not os.path.isfile(os.path.join(save_wav_path,wav_name_mix)):
+                                    rewav(save_wav_path,utt_id,mix_input_orig,mix_angle,input_size = input_size,wav_file = wav_name_mix)
+                                    #flag = 1
+                                wav_name_enhance = "{}_ep{}_it{}_enhance.wav".format(utt_id, epoch, iters) 
+                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
+                                rewav(save_wav_path,utt_id,enhance_out_orig,mix_angle,input_size = input_size,wav_file = wav_name_enhance)
                                 visualizer.plot_specgram(clean_input, mix_input, enhanced_out, input_size, file_name)
                                 num_saved_specgram += 1
                                 if num_saved_specgram >= opt.num_saved_specgram:

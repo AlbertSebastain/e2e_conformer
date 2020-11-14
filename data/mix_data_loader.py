@@ -8,12 +8,13 @@ from collections import defaultdict
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
+from progressbar import *
 
 from data.audioparse import FbankFeatLabelParser
 
 
 class MixSequentialDataset(Dataset, FbankFeatLabelParser):
-    def __init__(self, args, data_dir, dict_file):
+    def __init__(self, args, data_dir, dict_file,type_data):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -26,6 +27,7 @@ class MixSequentialDataset(Dataset, FbankFeatLabelParser):
         """
         self.args = args
         self.exp_path = args.exp_path
+        self.type_data = type_data
         
         self.feat_type = args.feat_type
         if self.feat_type.split('_')[0] == 'kaldi':
@@ -124,7 +126,11 @@ class MixSequentialDataset(Dataset, FbankFeatLabelParser):
     def loading_feat_len(self, feats_scp, out_scp):
         print('load feat_len from {} to {}'.format(feats_scp, out_scp))
         fwrite = open(out_scp, 'w')
+        num_lines = sum(1 for line in open(feats_scp,'r'))
         with open(feats_scp, 'r') as fid:
+
+            progress = ProgressBar().start()
+            nn = 0
             for line in fid:
                 line_splits = line.strip().split()
                 utt_id = line_splits[0] 
@@ -135,15 +141,22 @@ class MixSequentialDataset(Dataset, FbankFeatLabelParser):
                     else:
                         speech_wav = self.WaveData(wav_path)
                         in_feat = self.extract_feat(speech_wav, feat_type=self.feat_type)                             
-                    fwrite.write(utt_id + ' ' + str(in_feat.shape[0]) + '\n')  
+                    fwrite.write(utt_id + ' ' + str(in_feat.shape[0]) + '\n') 
+                    if nn == 100:
+                        #print('a')
+                        xxx = 1
+                    nn = nn+1 
+                    progress.update(int((nn/num_lines)*100))
                 except:
-                    print(line, 'error')                               
+                    print(line, 'error')  
+            progress.finish()                             
         fwrite.close()
 
     def loading_cmvn(self):
         if not os.path.isdir(self.exp_path):
             raise Exception(self.exp_path + ' isn.t a path!')
-        cmvn_file = os.path.join(self.exp_path, 'cmvn.npy')
+        cmvn_name = self.type_data+'_mix_cmvn.npy'
+        cmvn_file = os.path.join(self.exp_path, cmvn_name)
         if os.path.exists(cmvn_file):
             cmvn = np.load(cmvn_file)
             if cmvn.shape[1] == self.feat_size:
@@ -234,7 +247,9 @@ class MixSequentialDataset(Dataset, FbankFeatLabelParser):
         mix_log_spect = torch.FloatTensor(mix_log_spect)
         cos_angle = torch.FloatTensor(cos_angle)
         target_out = torch.LongTensor(target_out)
-        return mix_utt_id, spk_id, clean_spect, clean_log_spect, mix_spect, mix_log_spect, cos_angle, target_out
+        clean_angle = torch.FloatTensor(clean_angle) # modified shi
+        mix_angle = torch.FloatTensor(mix_angle) # modified shi
+        return mix_utt_id, spk_id, clean_spect, clean_log_spect, mix_spect, mix_log_spect, cos_angle, target_out, clean_angle, mix_angle, self.cmvn
 
     def __len__(self):
         return self.mix_feat_size
@@ -274,6 +289,8 @@ def _collate_fn(batch):
     cos_angles = torch.zeros(minibatch_size, max_seqlength, freq_size)
     input_sizes = torch.IntTensor(minibatch_size)
     target_sizes = torch.IntTensor(minibatch_size)
+    clean_angles = torch.zeros(minibatch_size,max_seqlength,freq_size) # modified by shi
+    mix_angles = torch.zeros(minibatch_size,max_seqlength,freq_size) #modified by shi
     targets = []
     utt_ids = []
     spk_ids = []
@@ -287,6 +304,9 @@ def _collate_fn(batch):
         mix_log_spect = sample[5]
         cos_angle = sample[6]
         target = sample[7]
+        clean_angle = sample[8]
+        mix_angle = sample [9]
+        cmvn = sample[10]
         utt_ids.append(utt_id)
         spk_ids.append(spk_id)
         seq_length = clean_spect.size(0)
@@ -295,12 +315,14 @@ def _collate_fn(batch):
         mix_inputs[x].narrow(0, 0, seq_length).copy_(mix_spect)
         mix_log_inputs[x].narrow(0, 0, seq_length).copy_(mix_log_spect)
         cos_angles[x].narrow(0, 0, seq_length).copy_(cos_angle)
+        clean_angles[x].narrow(0,0,seq_length).copy_(clean_angle) # modified by shi
+        mix_angles[x].narrow(0,0,seq_length).copy_(mix_angle)# modifed by shi
         input_sizes[x] = seq_length
         target_sizes[x] = len(target)
         targets.extend(target)
     targets = torch.LongTensor(targets)
-    return utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes
-
+    return utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, mix_angles, clean_angles, cmvn
+    # modified by shi
 
 class MixSequentialDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
@@ -344,3 +366,5 @@ class BucketingSampler(Sampler):
             ids.extend(sample_idx)
         bins = [ids[i:i + self.batch_size] for i in range(0, len(ids), self.batch_size)]
         return bins
+
+

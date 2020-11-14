@@ -59,6 +59,7 @@ def init_NLayerDiscriminator(input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNo
 		    use_bias = norm_layer == nn.InstanceNorm2d
 
     kw = 4
+    kw = 3 #############modified by shi
     padw = 1
     sequence = [
     	nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw),

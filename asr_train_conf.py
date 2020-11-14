@@ -37,6 +37,7 @@ def train():
     #opt = TrainOptions().parse()
     opt = fake_opt.asr_conf()
     #opt = fake_opt.asr_transf()
+
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
 
     visualizer = Visualizer(opt)
@@ -50,10 +51,10 @@ def train():
     #train_loader = CleanDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     #val_dataset = CleanDataset(opt, "dev")  # test train dev
     #val_loader = CleanDataLoader(val_dataset, batch_size=int(opt.batch_size / 2), num_workers=opt.num_workers)
-    train_fold = 'train'
-    dev_fold = 'dev'
-    train_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, train_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'train') 
-    val_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, dev_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'dev')    
+    train_fold = opt.train_folder
+    dev_fold = opt.dev_folder
+    train_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, train_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'train',mct = opt.MCT) 
+    val_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, dev_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'dev',mct = opt.MCT)    
     train_sampler = BucketingSampler(train_dataset,batch_size = opt.batch_size)
     train_loader = SequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     val_loader = SequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
@@ -80,8 +81,9 @@ def train():
 
     # convert to cuda
     asr_model.cuda()
+    #fbank_model.cuda()
     print(asr_model)
-
+    torch.cuda.empty_cache()
     # step3: 目标函数和优化器 Setup an optimizer
     parameters = filter(lambda p: p.requires_grad, itertools.chain(asr_model.parameters()))
     optimizer = torch.optim.Adam(parameters,lr = lr,betas = (opt.beta1,0.98), eps=eps)
@@ -109,6 +111,7 @@ def train():
     asr_model.train()
     sample_rampup = ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)
     sche_samp_rate = sample_rampup.update(iters)
+    #print(opt.MCT)
     if opt.MCT == True:
         fbank_cmvn_file = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
     else:
@@ -136,6 +139,12 @@ def train():
             # 训练模型参数
             utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
             fbank_features = fbank_model(inputs, fbank_cmvn)
+            # ys = []
+            # offset = 0
+            # for size in target_sizes:
+            #     ys.append(targets[offset : offset + size])
+            #     offset += size
+            # targets = pad_list(ys, asr_model.ignore_id)
             # 计算loss
             loss, acc = asr_model(fbank_features, input_sizes, targets,target_sizes)
             # for l in optimizer.optimizer.param_groups:
@@ -187,6 +196,7 @@ def train():
                     break
                 for op in optimizer.param_groups:
                     logging.info('lr = {}'.format(op['lr']))
+                torch.cuda.empty_cache()
             # evalutation
             if iters % opt.validate_freq == 0:
                 sche_samp_rate = sample_rampup.update(iters)
@@ -194,12 +204,17 @@ def train():
                 asr_model.eval()
                 torch.set_grad_enabled(False)
                 # num_saved_attention = 0
-
                 pbar = tqdm(total=len(val_dataset))
                 for i, (data) in enumerate(val_loader, start=0):
                     utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
 
                     fbank_features = fbank_model(inputs, fbank_cmvn)
+                    # ys = []
+                    # offset = 0
+                    # for size in target_sizes:
+                    #     ys.append(targets[offset : offset + size])
+                    #     offset += size
+                    # targets = pad_list(ys, asr_model.ignore_id)
                     loss,acc = asr_model(fbank_features, input_sizes, targets,target_sizes)
                     #loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
                     errors = {

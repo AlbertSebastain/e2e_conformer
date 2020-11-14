@@ -6,7 +6,7 @@ class TestOptions(BaseOptions):
         BaseOptions.initialize(self)
         
         # task related
-        self.parser.add_argument('--recog-dir', type=str, help='Filename of recognition feature data (Kaldi scp)')
+        self.parser.add_argument('--recog-dir', type=str, default = '',help='Filename of recognition feature data (Kaldi scp)')
         self.parser.add_argument('--enhance-dir', type=str, help='Filename of enhance feature data (Kaldi scp)')
         self.parser.add_argument('--enhance-out-dir', type=str, help='Filename of enhance feature data (Kaldi scp)')
         self.parser.add_argument('--recog-label', type=str, help='Filename of recognition label data (json)')
@@ -27,6 +27,8 @@ class TestOptions(BaseOptions):
         self.parser.add_argument('--ctc-weight', default=0.0, type=float, help='CTC weight in joint decoding')
         
         self.parser.add_argument('--fstlm-path', type=str, help='fstlm_path')
-        self.parser.add_argument('--nn-char-map-file', type=str, help='nn-char-map_file')       
+        self.parser.add_argument('--nn-char-map-file', type=str, help='nn-char-map_file')      
+        self.parser.add_argument('--recog_data',default = 'test', type = str, help = 'recognition data')
+        self.parser.add_argument('--e2e_resume',default = '',type = str, help = 'e2e resume file')
         
         

@@ -1,6 +1,6 @@
 import os
 import sys
-from data import kaldi_io
+import kaldi_io
 import librosa
 import numpy as np
 import scipy.signal
@@ -23,17 +23,20 @@ def make_wav(path_list, enhanced_wav_dir):
         real = np.cos(angle_mat) * feat_mat
         result = 1j * image
         result += real 
-        D = librosa.istft(result, n_fft=512, hop_length=256, win_length=512, window=scipy.signal.hamming)
+        result = result.T
+        D = librosa.istft(result, hop_length=256, win_length=512, window=scipy.signal.hamming)
         wav_file = os.path.join(enhanced_wav_dir, uttid + '.wav')
         wav.write(wav_file, 16000, D)
 
         
 def main():
     
-    noisy_angle_scp = sys.argv[1]
-    enhanced_feats_scp = sys.argv[2]
-    enhanced_wav_dir = sys.argv[3]
-    
+    #noisy_angle_scp = sys.argv[1]
+    #enhanced_feats_scp = sys.argv[2]
+    #enhanced_wav_dir = sys.argv[3]
+    noisy_angle_scp = "/usr/home/shi/projects/data_aishell/data/small_train/mix_angles.scp"
+    enhanced_feats_scp = "/usr/home/shi/projects/data_aishell/data/small_train/mix_feats.scp"
+    enhanced_wav_dir = "/usr/home/shi/projects/data_aishell/data/wavfile"
     if not os.path.exists(enhanced_wav_dir):
         os.makedirs(enhanced_wav_dir)
         
@@ -70,6 +73,7 @@ def main():
         wav_path_tmp_list = enhanced_list[start:end]
         start = end
         p.apply_async(make_wav, args=(wav_path_tmp_list, enhanced_wav_dir))
+        make_wav(wav_path_tmp_list, enhanced_wav_dir)
     print('Waiting for all subprocesses done...')
     p.close()
     p.join()

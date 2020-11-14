@@ -151,7 +151,6 @@ class EnhanceModel(ModelBase):
         else:
             logging.error("Error: need to specify an appropriate enhance archtecture")
             sys.exit()
-        
         if self.enhance_type == 'unet_128' or self.enhance_type == 'unet_256':
             linear_out = xs.squeeze(1)           
         else:              

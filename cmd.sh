@@ -12,4 +12,4 @@
 
 export train_cmd="run.pl --mem 2G"
 export cuda_cmd="run.pl --mem 2G --gpu 1"
-export decode_cmd="run.pl --mem 4G"
+export decode_cmd="run.pl --mem 8G"

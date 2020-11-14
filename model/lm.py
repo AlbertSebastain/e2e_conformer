@@ -168,14 +168,16 @@ def train(args):
     if not torch.cuda.is_available():
         logging.warning('cuda is not available')
 
-    with open(args.train_label, 'rb') as f:
-        train = np.array([args.char_list_dict[char]
-                          if char in args.char_list_dict else args.char_list_dict['<unk>']
-                          for char in f.readline().decode('utf-8').split()], dtype=np.int32)
-    with open(args.valid_label, 'rb') as f:
-        valid = np.array([args.char_list_dict[char]
-                          if char in args.char_list_dict else args.char_list_dict['<unk>']
-                          for char in f.readline().decode('utf-8').split()], dtype=np.int32)
+    #with open(args.train_label, 'rb') as f:
+        #train = np.array([args.char_list_dict[char]
+                          #if char in args.char_list_dict else args.char_list_dict['<unk>']
+                          #for char in f.readline().decode('utf-8').split()], dtype=np.int32)
+    train = load_text(args.train_label,args.char_list_dict)
+    # with open(args.valid_label, 'rb') as f:
+    #     valid = np.array([args.char_list_dict[char]
+    #                       if char in args.char_list_dict else args.char_list_dict['<unk>']
+    #                       for char in f.readline().decode('utf-8').split()], dtype=np.int32)
+    valid = load_text(args.valid_label,args.char_list_dict)
 
     logging.info('#vocab = ' + str(args.n_vocab))
     logging.info('#words in the training data = ' + str(len(train)))
@@ -337,3 +339,20 @@ def train(args):
                 best_valid = valid_perp
 
             epoch_now = train_iter.epoch
+def load_text(path_train_label,char_list_dict):
+    train_set = []
+    with open(path_train_label, 'rb') as f:
+        line = f.readline().decode('utf-8').split('<space>')
+        for char in line:
+            char_new = char.replace(' ','')
+            if char_new in char_list_dict:
+                train_set.append(char_list_dict[char_new])
+            else:
+                chars = char.split()
+                for c in chars:
+                    if c in char_list_dict:
+                        train_set.append(char_list_dict[c])
+                    else:
+                        train_set.append(char_list_dict['<unk>'])
+    train = np.array(train_set,dtype = np.int32)
+    return train

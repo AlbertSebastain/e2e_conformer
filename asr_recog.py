@@ -23,7 +23,8 @@ from utils.visualizer import Visualizer
 from utils import utils
 from char_error_rate import char_error
 opt = TestOptions().parse()
-#opt = fake_opt.e2e_test()
+if opt.recog_dir == '':
+    opt = fake_opt.e2e_test()
 manualSeed = random.randint(1, 10000)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
@@ -43,7 +44,7 @@ else:
     
 # data
 logging.info("Building dataset.")
-recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),) 
+recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'test') 
 recog_loader = SequentialDataLoader(recog_dataset, batch_size=1, num_workers=opt.num_workers, shuffle=False)
 opt.idim = recog_dataset.get_feat_size()
 opt.odim = recog_dataset.get_num_classes()
@@ -153,8 +154,10 @@ def main():
     else:
         rnnlm = None
         fstlm = None
-    
-    fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
+    if opt.MCT == True:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_mct_cmvn.npy')
+    else:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
     if os.path.exists(fbank_cmvn_file):
         fbank_cmvn = np.load(fbank_cmvn_file)
         fbank_cmvn = torch.FloatTensor(fbank_cmvn)

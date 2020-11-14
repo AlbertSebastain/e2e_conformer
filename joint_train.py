@@ -12,12 +12,15 @@ from tqdm import tqdm
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import fake_opt
 
 from options.train_options import TrainOptions
 from model.enhance_model import EnhanceModel
 from model.feat_model import FFTModel, FbankModel
-from model.e2e_model import ShareE2E
-from model.gan_model import GANModel, GANLoss, CORAL
+#from model.e2e_model import ShareE2E
+from model.e2e_model import E2E
+#from model.gan_model import GANModel, GANLoss, CORAL
+from model.gan_model import GANModel, GANLoss
 from model.e2e_common import set_requires_grad
 from data.mix_data_loader import MixSequentialDataset, MixSequentialDataLoader, BucketingSampler
 from utils.visualizer import Visualizer 
@@ -36,7 +39,7 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     ##print(enhance_model.state_dict())
     enhance_cmvn_file = os.path.join(opt.exp_path, 'enhance_cmvn.npy')
     for i, (data) in enumerate(train_loader, start=0):
-        utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+        utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,clean_angles,mix_angles,cmvn = data
         enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes) 
         enhance_cmvn = feat_model.compute_cmvn(enhance_out, input_sizes)
         if enhance_cmvn is not None:
@@ -51,7 +54,9 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     
          
 def main():    
-    opt = TrainOptions().parse()    
+    opt = TrainOptions().parse()   
+    if opt.exp_path == None:
+        opt = fake_opt.joint_train() 
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
      
     visualizer = Visualizer(opt)  
@@ -61,8 +66,10 @@ def main():
      
     # data
     logging.info("Building dataset.")
-    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'train'), os.path.join(opt.dict_dir, 'train_units.txt'),) 
-    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, 'dev'), os.path.join(opt.dict_dir, 'train_units.txt'),)
+    train_data = 'train'
+    dev_data = 'dev'
+    train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_data)
+    val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, dev_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_data)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
     train_loader  = MixSequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
     val_loader    = MixSequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
@@ -83,7 +90,7 @@ def main():
     start_epoch = opt.start_epoch
     
     enhance_model_path = None
-    if opt.enhance_resume:
+    if (opt.enhance_resume != None) & (opt.joint_resume == None):
         enhance_model_path = os.path.join(opt.works_dir, opt.enhance_resume)
         if os.path.isfile(enhance_model_path):
             enhance_model = EnhanceModel.load_model(enhance_model_path, 'enhance_state_dict', opt)
@@ -91,15 +98,16 @@ def main():
             print("no checkpoint found at {}".format(enhance_model_path))     
     
     asr_model_path = None
-    if opt.asr_resume:
+    if (opt.asr_resume != None) & (opt.joint_resume == None):
         asr_model_path = os.path.join(opt.works_dir, opt.asr_resume)
         if os.path.isfile(asr_model_path):
-            asr_model = ShareE2E.load_model(asr_model_path, 'asr_state_dict', opt)
+            #asr_model = ShareE2E.load_model(asr_model_path, 'asr_state_dict', opt)
+            asr_model = E2E.load_model(asr_model_path,'asr_state_dict',opt)
         else:
             print("no checkpoint found at {}".format(asr_model_path))  
                                         
     joint_model_path = None
-    if opt.joint_resume:
+    if opt.joint_resume != None:
         joint_model_path = os.path.join(opt.works_dir, opt.joint_resume)
         if os.path.isfile(joint_model_path):
             package = torch.load(joint_model_path, map_location=lambda storage, loc: storage)
@@ -117,11 +125,52 @@ def main():
     if joint_model_path is not None or enhance_model_path is None:     
         enhance_model = EnhanceModel.load_model(joint_model_path, 'enhance_state_dict', opt)    
     if joint_model_path is not None or asr_model_path is None:  
-        asr_model = ShareE2E.load_model(joint_model_path, 'asr_state_dict', opt)     
+        #asr_model = ShareE2E.load_model(joint_model_path, 'asr_state_dict', opt) 
+        asr_model = E2E.load_model(asr_model_path,'asr_state_dict',opt)    
     feat_model = FbankModel.load_model(joint_model_path, 'fbank_state_dict', opt) 
     if opt.isGAN:
-        gan_model = GANModel.load_model(joint_model_path, 'gan_state_dict', opt) 
+        if joint_model_path != None:
+            gan_model = GANModel.load_model(joint_model_path, 'gan_state_dict', opt)
+        elif opt.gan_resume != None:
+            gan_path = os.path.join(opt.works_dir,opt.gan_resume)
+            gan_model = GANModel.load_model(gan_path,'gan_state_dict',opt)
+        else:
+            gan_model = GANModel.load_model(enhance_model_path,'gan_state_dict',opt)
     ##set_requires_grad([enhance_model], False)    
+    if opt.lmtype == 't':         
+        # read rnnlm
+        if opt.rnnlm:
+            if opt.embed_init_file is not None:
+                word_dim = 0 
+                with open(opt.embed_init_file, 'r', encoding='utf-8') as fid:
+                    for line in fid:
+                        line_splits = line.strip().split()               
+                        word_dim = len(line_splits[1:])
+                        break          
+                shape = (len(opt.char_list), word_dim)
+                scale = 0.05
+                embed_vecs_init = np.array(np.random.uniform(low=-scale, high=scale, size=shape), dtype=np.float32)
+                #input_unit = word_dim
+                #with open(opt.embed_init_file, 'r', encoding='utf-8') as fid:
+                        #try:
+                            #for line in fid:
+                            #line_splits = line.strip().split()
+                            #char = line_splits[0]
+                            #if char in opt.char_list_dict:
+                                #vector = np.array(map(float, line_splits[1:]), dtype='float32') 
+                                #index = args.char_list_dict[char]
+                                #embed_vecs_init[index] = vector
+                        #except:
+                            #pass                
+            else:
+                embed_vecs_init = None 
+            rnnlm = lm.ClassifierWithState(
+                lm.RNNLM(len(opt.char_list), word_dim, 650,embed_vecs_init = embed_vecs_init))
+            rnnlm.load_state_dict(torch.load(opt.rnnlm, map_location=cpu_loader))
+            if len(opt.gpu_ids) > 0: 
+                rnnlm = rnnlm.cuda()     
+            print('load RNNLM from {}'.format(opt.rnnlm))
+            rnnlm.eval()
     
     # Setup an optimizer
     enhance_parameters = filter(lambda p: p.requires_grad, enhance_model.parameters())
@@ -140,7 +189,11 @@ def main():
             gan_optimizer = torch.optim.Adam(gan_parameters, lr=lr, betas=(opt.beta1, 0.999))
     if opt.isGAN:
         criterionGAN = GANLoss(use_lsgan=not opt.no_lsgan).to(device)
-       
+    fbank_path = os.path.join(opt.exp_path,'fbank_cmvn.npy')
+    fbank_cmvn = np.load(fbank_path)
+    fbank_cmvn = torch.FloatTensor(fbank_cmvn)
+    #fbank_cmvn = fbank_model.compute_cmvn(inputs, input_sizes)
+    fbank_cmvn = torch.FloatTensor(fbank_cmvn)
     # Training	
     enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model) 
     sample_rampup = utils.ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)  
@@ -148,13 +201,14 @@ def main():
     
     enhance_model.train()
     feat_model.train()
-    asr_model.train()               	                    
+    asr_model.train()     
+    fstlm = None          	                    
     for epoch in range(start_epoch, opt.epochs):               
         if epoch > opt.shuffle_epoch:
             print("Shuffling batches for the following epochs")
             train_sampler.shuffle(epoch)  
         for i, (data) in enumerate(train_loader, start=0):
-            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,clean_angels,mix_angles,cmvn = data
             enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes) 
             enhance_feat = feat_model(enhance_out)
             clean_feat = feat_model(clean_inputs)
@@ -167,9 +221,17 @@ def main():
                 enhance_loss = F.smooth_l1_loss(enhance_feat, clean_feat.detach())
             enhance_loss = opt.enhance_loss_lambda * enhance_loss
                 
-            loss_ctc, loss_att, acc, clean_context, mix_context = asr_model(clean_feat, enhance_feat, targets, input_sizes, target_sizes, sche_samp_rate, enhance_cmvn) 
-            coral_loss = opt.coral_loss_lambda * CORAL(clean_context, mix_context)              
+            #loss_ctc, loss_att, acc, clean_context, mix_context = asr_model(clean_feat, enhance_feat, targets, input_sizes, target_sizes, sche_samp_rate, enhance_cmvn) 
+            clean_feature = feat_model(clean_inputs,fbank_cmvn)
+            enhance_feature = feat_model(enhance_out,enhance_cmvn)
+            loss_ctc, loss_att, acc = asr_model(enhance_feature, targets, input_sizes, target_sizes, sche_samp_rate)
+            #nbest_hyps = asr_model.recognize(enhance_feature, opt, opt.char_list, rnnlm=rnnlm, fstlm=fstlm)
+            #mix_context = nbest_hyps[0]['yseq'][1:]
+            #nbest_hyps = asr_model.recognize(clean_feature, opt, opt.char_list, rnnlm=rnnlm, fstlm=fstlm)
+            #clean_context = nbest_hyps[0]['yseq'][1:]
+            #coral_loss = opt.coral_loss_lambda * CORAL(clean_context, mix_context)              
             asr_loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
+            coral_loss = 0
             loss = asr_loss + enhance_loss + coral_loss
                     
             if opt.isGAN:
@@ -177,8 +239,11 @@ def main():
                 if opt.netD_type == 'pixel':
                     fake_AB = torch.cat((mix_feat, enhance_feat), 2)
                 else:
-                    fake_AB = enhance_feat
-                gan_loss = opt.gan_loss_lambda * criterionGAN(gan_model(fake_AB, enhance_cmvn), True)
+                    #fake_AB = enhance_feat
+                    fake_AB = enhance_feature
+                #fake_AB_feat = feat_model(fake_AB,enhance_cmvn)
+                #gan_loss = opt.gan_loss_lambda * criterionGAN(gan_model(fake_AB,enhance_cmvn), True)
+                gan_loss = opt.gan_loss_lambda * criterionGAN(gan_model(fake_AB), True)
                 loss += gan_loss
                                               
             enhance_optimizer.zero_grad()
@@ -199,10 +264,14 @@ def main():
                     fake_AB = torch.cat((mix_feat, enhance_feat), 2)
                     real_AB = torch.cat((mix_feat, clean_feat), 2)
                 else:
-                    fake_AB = enhance_feat
-                    real_AB = clean_feat
-                loss_D_real = criterionGAN(gan_model(real_AB.detach(), enhance_cmvn), True)
-                loss_D_fake = criterionGAN(gan_model(fake_AB.detach(), enhance_cmvn), False)
+                    #fake_AB = enhance_feat
+                    #real_AB = clean_feat
+                    fake_AB = enhance_feature
+                    real_AB = clean_feature
+                #loss_D_real = criterionGAN(gan_model(real_AB.detach(), enhance_cmvn), True)
+                #loss_D_fake = criterionGAN(gan_model(fake_AB.detach(), enhance_cmvn), False)
+                loss_D_real = criterionGAN(gan_model(real_AB.detach()), True)
+                loss_D_fake = criterionGAN(gan_model(fake_AB.detach()), False)
                 loss_D = (loss_D_real + loss_D_fake) * 0.5
                 loss_D.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(gan_model.parameters(), opt.grad_clip)
@@ -212,9 +281,12 @@ def main():
                     gan_optimizer.step()
                                                
             iters += 1
+            #errors = {'train/loss': loss.item(), 'train/loss_ctc': loss_ctc.item(), 
+                      #'train/acc': acc, 'train/loss_att': loss_att.item(), 
+                      #'train/enhance_loss': enhance_loss.item(), 'train/coral_loss': coral_loss.item()}
             errors = {'train/loss': loss.item(), 'train/loss_ctc': loss_ctc.item(), 
                       'train/acc': acc, 'train/loss_att': loss_att.item(), 
-                      'train/enhance_loss': enhance_loss.item(), 'train/coral_loss': coral_loss.item()}
+                      'train/enhance_loss': enhance_loss.item()}
             if opt.isGAN:
                 errors['train/loss_D'] = loss_D.item()
                 errors['train/gan_loss'] = opt.gan_loss_lambda * gan_loss.item()  
@@ -243,11 +315,13 @@ def main():
                 torch.set_grad_enabled(False)                
                 num_saved_attention = 0 
                 for i, (data) in tqdm(enumerate(val_loader, start=0)):
-                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes = data
+                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,clean_angles,mix_angles,cmvn = data
                     enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes)                         
                     enhance_feat = feat_model(enhance_out)
                     clean_feat = feat_model(clean_inputs)
                     mix_feat = feat_model(mix_inputs)
+                    val_enhance_feature = feat_model(enhance_out,enhance_cmvn)
+                    val_clean_feature = feat_model(clean_inputs,fbank_cmvn)
                     if opt.enhance_loss_type == 'L2':
                         enhance_loss = F.mse_loss(enhance_feat, clean_feat.detach())
                     elif opt.enhance_loss_type == 'L1':
@@ -259,12 +333,15 @@ def main():
                         if opt.netD_type == 'pixel':
                             fake_AB = torch.cat((mix_feat, enhance_feat), 2)
                         else:
-                            fake_AB = enhance_feat
-                        gan_loss = criterionGAN(gan_model(fake_AB, enhance_cmvn), True)
+                            #fake_AB = enhance_feat
+                            fake_AB = val_enhance_feature
+                        #gan_loss = criterionGAN(gan_model(fake_AB, enhance_cmvn), True)
+                        gan_loss = criterionGAN(gan_model(fake_AB), True)
                         enhance_loss += opt.gan_loss_lambda * gan_loss
                         
-                    loss_ctc, loss_att, acc, clean_context, mix_context = asr_model(clean_feat, enhance_feat, targets, input_sizes, target_sizes, 0.0, enhance_cmvn)
-                                                  
+                    #loss_ctc, loss_att, acc, clean_context, mix_context = asr_model(clean_feat, enhance_feat, targets, input_sizes, target_sizes, 0.0, enhance_cmvn)
+                    #val_enhance_feature = feat_model(enhance_out,enhance_cmvn)
+                    loss_ctc,loss_att,acc = asr_model(val_enhance_feature, targets, input_sizes, target_sizes, sche_samp_rate)                     
                     asr_loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
                     enhance_loss = opt.enhance_loss_lambda * enhance_loss
                     loss = asr_loss + enhance_loss                          
@@ -277,7 +354,8 @@ def main():
                 
                     if opt.num_save_attention > 0 and opt.mtlalpha != 1.0:
                         if num_saved_attention < opt.num_save_attention:
-                            att_ws = asr_model.calculate_all_attentions(enhance_feat, targets, input_sizes, target_sizes, enhance_cmvn)                            
+                            #att_ws = asr_model.calculate_all_attentions(enhance_feat, targets, input_sizes, target_sizes, enhance_cmvn) 
+                            att_ws = asr_model.calculate_all_attentions(val_enhance_feature, targets, input_sizes, target_sizes)                             
                             for x in range(len(utt_ids)):
                                 att_w = att_ws[x]
                                 utt_id = utt_ids[x]

@@ -15,8 +15,8 @@ class BaseOptions():
         self.parser.add_argument('--dataroot', help='path (should have subfolders train, dev, test)')
         self.parser.add_argument('--dict_dir', default='/home/bliu/SRC/workspace/e2e/data/mix_aishell/lang_1char/', help='path to dict')
         self.parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
-        self.parser.add_argument('--name', type=str, default='vad', help='name of the experiment.')
-        self.parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')  
+        self.parser.add_argument('--name', type=str, default='', help='name of the experiment.')
+        self.parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints1', help='models are saved here')  
         self.parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')   
         self.parser.add_argument('--enhance_resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
         self.parser.add_argument('--asr_resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')  
@@ -34,6 +34,7 @@ class BaseOptions():
         self.parser.add_argument('--mix_noise', dest='mix_noise', action='store_true', help='mix_noise')        
         self.parser.add_argument('--lowSNR', type=float, default=5, help='lowSNR')
         self.parser.add_argument('--upSNR', type=float, default=30, help='upSNR') 
+        self.parser.add_argument('--exp_path',type=str,default = None,help = 'exp_dir')
                         
         # encoder
         self.parser.add_argument('--etype', default='vggblstmp', type=str, choices=['blstm','blstmp','cnnblstmp','cnnblstm', 'vggblstmp','vggblstm'], 
@@ -89,6 +90,7 @@ class BaseOptions():
         self.parser.add_argument('--ndf', type=int, default=64, help='# of discrim filters in first conv layer')
         self.parser.add_argument('--norm_D', type=str, default='batch', help='instance normalization or batch normalization [batch | norm | none]')        
         self.parser.add_argument('--no_lsgan', action='store_true', help='do *not* use least square GAN, if false, use vanilla GAN')
+        self.parser.add_argument('--gan_resumne',type = str, default= None, help = 'the model of gan')
         
         # fbank model
         self.parser.add_argument('--fbank_dim', type=int, default=40, help='num_features of a frame')
@@ -152,14 +154,15 @@ class BaseOptions():
         print('-------------- End ----------------')
 
         # save to the disk
-        exp_path = os.path.join(self.opt.checkpoints_dir, self.opt.name)
-        utils.mkdirs(exp_path)
-        self.opt.exp_path = exp_path
-        file_name = os.path.join(exp_path, 'opt.txt')
-        with open(file_name, 'wt') as opt_file:
-            opt_file.write('------------ Options -------------\n')
-            for k, v in sorted(args.items()):
-                opt_file.write('%s: %s\n' % (str(k), str(v)))
-            opt_file.write('-------------- End ----------------\n')
+        #exp_path = os.path.join(self.opt.checkpoints_dir, self.opt.name)
+        #utils.mkdirs(self.opt.exp_path)
+        #self.opt.exp_path = self.opt.exp_path
+        if self.opt.name != '':
+            file_name = os.path.join(self.opt.checkpoints_dir,self.opt.name, 'opt.txt')
+            with open(file_name, 'wt') as opt_file:
+                opt_file.write('------------ Options -------------\n')
+                for k, v in sorted(args.items()):
+                    opt_file.write('%s: %s\n' % (str(k), str(v)))
+                opt_file.write('-------------- End ----------------\n')
         return self.opt
 

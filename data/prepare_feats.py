@@ -10,6 +10,7 @@ import random
 from random import choice
 from multiprocessing import Pool
 import scipy.io.wavfile as wav
+from progressbar import *
 
 
 def load_audio(path):
@@ -107,7 +108,7 @@ def make_feature(wav_path_list, noise_wav_list, feat_dir, thread_num, argument=F
 
         
 def main():
-    data_dir = "/usr/home/shi/projects/data_aishell/data/dev"
+    data_dir = "/usr/home/shi/projects/data_aishell/data/test"
     feat_dir = data_dir
     #data_dir = sys.argv[1]
     #feat_dir = sys.argv[2]
@@ -165,7 +166,7 @@ def main():
     
     wav_num = len(clean_wav_list)
     print('Parent process %s.' % os.getpid())
-    p = Pool()    
+    #p = Pool()    
     for i in range(threads_num):
         wav_path_tmp_list = clean_wav_list[int(i * wav_num / threads_num): int((i + 1) * wav_num / threads_num)]
         p.apply_async(make_feature, args=(wav_path_tmp_list, noise_wav_list, mix_feat_dir, i, True, noise_repeat_num))
