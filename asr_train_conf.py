@@ -25,6 +25,7 @@ from e2e_asr_conformer import E2E
 #from config_transformer import TrainOptions
 import fake_opt
 from model.feat_model import FbankModel
+import datetime
 
 SEED = random.randint(1, 10000)
 random.seed(SEED)
@@ -78,17 +79,10 @@ def train():
     start_epoch = opt.start_epoch  # default=0
     best_loss = opt.best_loss  # default=float('inf')
     best_acc = opt.best_acc  # default=0
-
+    model_path = None
     # convert to cuda
-    asr_model.cuda()
     #fbank_model.cuda()
-    print(asr_model)
-    torch.cuda.empty_cache()
     # step3: 目标函数和优化器 Setup an optimizer
-    parameters = filter(lambda p: p.requires_grad, itertools.chain(asr_model.parameters()))
-    optimizer = torch.optim.Adam(parameters,lr = lr,betas = (opt.beta1,0.98), eps=eps)
-    if opt.opt_type == 'noam':
-        optimizer = NoamOpt(asr_model.adim, 1, 25000, optimizer)
     if opt.resume:
         model_path = os.path.join(opt.works_dir, opt.resume)
         if os.path.isfile(model_path):
@@ -99,15 +93,25 @@ def train():
             best_acc = package.get('best_acc', 0)
             start_epoch = int(package.get('epoch', 0))   
             iters = int(package.get('iters', 0))
+            iters = iters-1
             
             acc_report = package.get('acc_report', acc_report)
             loss_report = package.get('loss_report', loss_report)
             visualizer.set_plot_report(acc_report, 'acc.png')
             visualizer.set_plot_report(loss_report, 'loss.png')
             
-            asr_model = E2E.load_model(model_path, 'state_dict') 
-            fbank_model = FbankModel.load_model(model_path, 'fbank_state_dict') 
+
             logging.info('Loading model {} and iters {}'.format(model_path, iters))
+        else:
+            print("no checkpoint found at {}".format(model_path))     
+    asr_model = E2E.load_model(model_path, 'asr_state_dict',opt) 
+    fbank_model = FbankModel.load_model(model_path, 'fbank_state_dict',opt) 
+    parameters = filter(lambda p: p.requires_grad, itertools.chain(asr_model.parameters()))
+    optimizer = torch.optim.Adam(parameters,lr = lr,betas = (opt.beta1,0.98), eps=eps)
+    if opt.opt_type == 'noam':
+        optimizer = NoamOpt(asr_model.adim, 1, 25000, optimizer,iters)
+    asr_model.cuda()
+    print(asr_model)
     asr_model.train()
     sample_rampup = ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)
     sche_samp_rate = sample_rampup.update(iters)
@@ -146,7 +150,9 @@ def train():
             #     offset += size
             # targets = pad_list(ys, asr_model.ignore_id)
             # 计算loss
+
             loss, acc = asr_model(fbank_features, input_sizes, targets,target_sizes)
+
             # for l in optimizer.optimizer.param_groups:
             #     r = l['lr']
             #     print(r)
@@ -154,7 +160,6 @@ def train():
             #loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
             optimizer.zero_grad()  # Clear the parameter gradients
             loss.backward()  # compute backwards
-
             #  梯度裁剪是根据参数的范数来衡量的
             grad_norm = torch.nn.utils.clip_grad_norm_(asr_model.parameters(), opt.grad_clip)
             if math.isnan(grad_norm):
