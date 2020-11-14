@@ -3,7 +3,16 @@
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
-
+##########
+# the file is for e2e attention model for 3 data
+# clean       match           unmatch
+# the data names 
+# test        mix_test_match  mix_test_unmatch
+# note the feats.scp in mix_test folder is the mix feats but delete the flag 'mix'
+# there are two types of models
+# 1 attention model tranined by clean data
+# 2 attention model is trained by mct
+##########
 # general configuration
 stage=5        # start from 0 if you need to start from data preparation
 #gpu=            # will be deprecated, please use ngpu
@@ -14,31 +23,24 @@ N=0            # number of minibatches to be used (mainly for debugging). "0" us
 verbose=1      # verbose option
 resume=${resume:=none}    # Resume the training from snapshot
 
-mtlalpha=0.5
+# feature configuration
+do_delta=false # true when using CNN
 
-# minibatch related
-maxlen_in=800  # if input length  > maxlen_in, batchsize is automatically reduced
-maxlen_out=150 # if output length > maxlen_out, batchsize is automatically reduced
 
 
 # rnnlm related
 model_unit=char
-lm_weight=0.7
+lm_weight=0.2
 fusion=${fusion:=none}
 
 # decoding parameter
 lmtype=rnnlm
 beam_size=12
-nbest=10
+nbest=12
 penalty=0.0
 maxlenratio=0.0
 minlenratio=0.0
-ctc_weight=0.5
-recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
-
-
-# exp tag
-tag="" # tag for managing experiments.
+ctc_weight=0.3
 
 . utils/parse_options.sh || exit 1;
 . ./cmd.sh
@@ -61,11 +63,10 @@ set -u
 set -o pipefail
 
 dataroot="/usr/home/shi/projects/data_aishell/data"
-##dictroot="/home/bliu/mywork/workspace/e2e/data/lang_1char/"
 dictroot="/usr/home/shi/projects/data_aishell/data/lang/phones"
 train_set=train
 train_dev=dev
-recog_set="test"
+recog_set=("test" "mix_test_match" "mix_test_unmatch")
 
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
 dict=${dictroot}/${train_set}_units.txt
@@ -73,34 +74,31 @@ embed_init_file=${dictroot}/sgns
 echo "dictionary: ${dict}"
 nlsyms=${dictroot}/non_lang_syms.txt
 #lmexpdir=checkpoints/train_${lmtype}_2layer_${input_unit_lm}_${hidden_unit_lm}_drop${dropout_lm}_bs${batchsize_lm}
-lmexpdir=/usr/home/shi/projects/e2e_speech_project/checkpoints_new/train_rnnlm
+lmexpdir=checkpoints_new/train_rnnlm
 
-
-#name=aishell_${model_unit}_${etype}_e${elayers}_subsample${subsample}_${subsample_type}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_${aact_func}_aconvc${aconv_chans}_aconvf${aconv_filts}_lsm_type${lsm_type}_lsm_weight${lsm_weight}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}_dropout${dropout_rate}_fusion${fusion}
-#name="aishell_char_vggblstmp_e8_subsample1_2_2_1_1_skip_unit320_proj320_d1_unit300_lr0.02_location_softmax_aconvc10_aconvf100_lsm_typenone_lsm_weight0.0_num_save_attention0.5_adadelta_bs30_mli800_mlo150_dropout0.0_fusionnone"
-
-
-
-expdir="/usr/home/shi/projects/e2e_speech_conformer_kang/data_model/conformer"
-fst_path="/home/bliu/mywork/workspace/e2e/data/lang_word/LG_pushed_withsyms.fst"
-nn_char_map_file="/usr/home/shi/projects/data_aishell/dev/tex_cha"
-save_dir="/usr/home/shi/projects/e2e_speech_conformer_kang/checkpoints_new"
-decode_dir=decode_conformer_clean_${recog_set}
-name=${save_dir}/${decode_dir}
-if [ ${stage} -le 5 ]; then
-    #echo "stage 5: Decoding"
+exproot="/usr/home/shi/projects/e2e_speech_project/data_model/"
+save_dir="/usr/home/shi/projects/e2e_speech_project/checkpoints_new/recog_multitype"
+# task related
+models=("asr_model" "e2e_mct_att")
+mcts=("False" "True")
     nj=8
-    for rtask in ${recog_set}; do
+for index in 0 1; do 
+    model=${models[${index}]}
+    mct=${mcts[${index}]}
+    for index_r in 0 1 2; do
     ##(
-        #decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}_${lmtype}${lm_weight}_10_15_20
-       
+        rtask=${recog_set[${index_r}]}
+        decode_dir="recog_${model}_${rtask}"
+        name=${save_dir}/${decode_dir}
+        echo "the recog result is saved in"
+        echo ${name}  
+        feat_recog_dir=${dataroot}/${rtask}
+        expdir=${exproot}/${model}
         feat_recog_dir=${dataroot}/${rtask}
         #./utils/fix_data_dir.sh ${feat_recog_dir}
         # split data
         #splitjson.py --parts ${nj} ${feat_recog_dir}/data.json  --kenlm ${dictroot}/text.arpa \
         sdata=${feat_recog_dir}/split$nj
-
-        mkdir -p ${expdir}/${decode_dir}/log/
        
 
         #[[ -d $sdata && ${feat_recog_dir}/feats.scp -ot $sdata ]] || 
@@ -109,7 +107,7 @@ if [ ${stage} -le 5 ]; then
 
         #### use CPU for decoding  ##& ##${decode_cmd} JOB=1 ${expdir}/${decode_dir}/log/decode.JOB.log \
        ${decode_cmd} JOB=1:${nj} ${save_dir}/${decode_dir}/log/decode.JOB.log \
-           python3 asr_recog_conf.py \
+           python3 asr_recog.py \
            --dataroot ${dataroot} \
            --dict_dir ${dictroot} \
            --name $name \
@@ -133,14 +131,9 @@ if [ ${stage} -le 5 ]; then
            --lm-weight ${lm_weight} \
            --embed-init-file ${embed_init_file} \
            --exp_path ${expdir} \
-           --mtlalpha ${mtlalpha} \
-           --MCT ${mct}
-            #--fstlm-path ${fst_path} \
-            #--nn-char-map-file ${nn_char_map_file} \
+           --MCT ${mct} \
+           --test_folder ${rtask}
 
-
-            #--fstlm-path ${fst_path} \
-            #--nn-char-map-file ${nn_char_map_file} \
           
         score_sclite.sh --nlsyms ${nlsyms} ${save_dir}/${decode_dir} ${dict}
         
@@ -148,6 +141,5 @@ if [ ${stage} -le 5 ]; then
         ##rescore_sclite.sh --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${expdir}/${decode_dir}_rescore ${dict} ${kenlm_path}
     ##) &
     done
-    ##wait
-    echo "Finished"
-fi
+done
+echo "Finished"
