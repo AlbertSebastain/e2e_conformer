@@ -169,7 +169,8 @@ class asr_conf(Asr_train):
         self.maxlen_in = 512
         self.maxlen_out = 150
         self.resume = 'model.acc.best'
-        self.name = 'asr_e2e_mct_conformtrain_test'
+        #self.resume = None
+        self.name = 'asr_e2e_mct_conformtrain'
         self.MCT = True
 class asr_recog_conf(asr_conf):
     def __init__(self):
@@ -182,14 +183,17 @@ class asr_recog_conf(asr_conf):
         self.minlenratio = 0.0
         self.ctc_weight = 0.5
         self.resume = 'model.acc.best'
+        self.save_dir = './checkpoints_new'
+    
         self.works_dir = self.exp_path
         self.embed_init_file = '/usr/home/shi/projects/data_aishell/data/lang/phones/sgns'
         self.word_rnnlm = None
-        self.name = 'recog_conf_testff'
+        self.name = os.path.join(self.save_dir,'recog_conf_testzz')
         self.rnnlm = '/usr/home/shi/projects/e2e_speech_project/checkpoints_new/train_rnnlm/rnnlm.model.best'
         self.penalty = 0
         self.lm_weight = 0.7
         self.ngram_weight = 0.3
+        self.MCT = True
 
 
 

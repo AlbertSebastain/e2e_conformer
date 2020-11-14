@@ -32,7 +32,6 @@ random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
 
-
 def train():
     # step0: 导入参数，cuda 和 logging
     #opt = TrainOptions().parse()
@@ -192,16 +191,15 @@ def train():
                 }
                 filename = "latest"
                 save_checkpoint(state, opt.exp_path, filename=filename)
-                for name, parms in asr_model.named_parameters():	
-                    logging.info('name'+str(name))
-                    logging.info('parms')
-                    logging.info(parms[0:2])
-                    logging.info('grad')
-                    logging.info(parms.grad[0:2])
-                    break
-                for op in optimizer.param_groups:
-                    logging.info('lr = {}'.format(op['lr']))
-                torch.cuda.empty_cache()
+                # for name, parms in asr_model.named_parameters():	
+                #     logging.info('name'+str(name))
+                #     logging.info('parms')
+                #     logging.info(parms[0:2])
+                #     logging.info('grad')
+                #     logging.info(parms.grad[0:2])
+                #     break
+                # for op in optimizer.param_groups:
+                #     logging.info('lr = {}'.format(op['lr']))
             # evalutation
             if iters % opt.validate_freq == 0:
                 sche_samp_rate = sample_rampup.update(iters)

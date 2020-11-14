@@ -29,7 +29,10 @@ manualSeed = random.randint(1, 10000)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 torch.cuda.manual_seed(manualSeed)  
-
+def str2bool(stri):
+    return True if stri.lower() == 'true' else False
+if type(opt.MCT) == str:
+    opt.MCT = str2bool(opt.MCT)
 # logging info
 if opt.verbose == 1:
     logging.basicConfig(
@@ -44,7 +47,7 @@ else:
     
 # data
 logging.info("Building dataset.")
-recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'test') 
+recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),type_data = opt.test_folder,mct = opt.MCT) 
 recog_loader = SequentialDataLoader(recog_dataset, batch_size=1, num_workers=opt.num_workers, shuffle=False)
 opt.idim = recog_dataset.get_feat_size()
 opt.odim = recog_dataset.get_num_classes()
@@ -53,7 +56,7 @@ opt.labeldist = recog_dataset.get_labeldist()
 print('#input dims : ' + str(opt.idim))
 print('#output dims: ' + str(opt.odim))
 logging.info("Dataset ready!")
-
+logging.info('mct' + str(opt.MCT))
                                               
 def main():
     
