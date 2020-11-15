@@ -76,7 +76,7 @@ nlsyms=${dictroot}/non_lang_syms.txt
 #lmexpdir=checkpoints/train_${lmtype}_2layer_${input_unit_lm}_${hidden_unit_lm}_drop${dropout_lm}_bs${batchsize_lm}
 lmexpdir=checkpoints_new/train_rnnlm
 
-exproot="/usr/home/shi/projects/e2e_speech_project/data_model/"
+exproot="/usr/home/shi/projects/e2e_speech_project/data_model"
 save_dir="/usr/home/shi/projects/e2e_speech_project/checkpoints_new/recog_multitype"
 # task related
 models=("asr_model" "e2e_mct_att")
