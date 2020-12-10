@@ -80,7 +80,7 @@ save_dir="/usr/home/shi/projects/e2e_speech_project/checkpoints_new/recog_multit
 models=("conformer" "mct_conformer")
 mcts=("False" "True")
 nj=8
-for index in 0 1; do 
+for index in 1; do 
     model=${models[${index}]}
     mct=${mcts[${index}]}
     for index_r in 0 1 2; do
