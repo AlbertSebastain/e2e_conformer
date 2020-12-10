@@ -20,7 +20,8 @@ import fake_opt
 from model.enhance_model import EnhanceModel
 from model.feat_model import FFTModel, FbankModel
 #from model.e2e_model import ShareE2E
-from model.e2e_model import E2E
+from e2e_asr_conformer import E2E
+from transformer.optimizer import NoamOpt
 #from model.gan_model import GANModel, GANLoss, CORAL
 from model.gan_model import GANModel, GANLoss
 from model.e2e_common import set_requires_grad
@@ -58,7 +59,7 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
 def main():    
     #opt = TrainOptions().parse()   
     #if opt.exp_path == None:
-    opt = fake_opt.joint_train() 
+    opt = fake_opt.conf_joint_train() 
     opt.name = sys.argv[1]
     temp_root = '/usr/home/shi/projects/e2e_speech_project/data_model'
     opt.exp_path = os.path.join(temp_root,opt.name)
@@ -77,9 +78,9 @@ def main():
     train_data = sys.argv[2]
     dev_data = sys.argv[3]
     if 'mct' in opt.name:
-        opt.MCT = True
-    else:
         opt.MCT = False
+    else:
+        opt.MCT = True
     train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_data)
     val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, dev_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_data)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
@@ -115,6 +116,8 @@ def main():
         if os.path.isfile(asr_model_path):
             #asr_model = ShareE2E.load_model(asr_model_path, 'asr_state_dict', opt)
             asr_model = E2E.load_model(asr_model_path,'asr_state_dict',opt)
+            package = torch.load(asr_model_path, map_location=lambda storage, loc: storage)
+            step = int(package.get('iters',0))-1
         else:
             print("no checkpoint found at {}".format(asr_model_path))  
                                         
@@ -155,11 +158,13 @@ def main():
     asr_parameters = filter(lambda p: p.requires_grad, asr_model.parameters())
     if opt.isGAN:
         gan_parameters = filter(lambda p: p.requires_grad, gan_model.parameters())   
-    if opt.opt_type == 'adadelta':
+    if opt.opt_type == 'noam':
         enhance_optimizer = torch.optim.Adadelta(enhance_parameters, rho=0.95, eps=eps)
-        asr_optimizer = torch.optim.Adadelta(asr_parameters, rho=0.95, eps=eps)
+        asr_optimizer = torch.optim.Adam(asr_parameters,lr = lr,betas = (opt.beta1,0.98), eps=eps)
+        asr_optimizer = NoamOpt(asr_model.adim, 1, 25000, asr_optimizer,step)
         if opt.isGAN:
             gan_optimizer = torch.optim.Adadelta(gan_parameters, rho=0.95, eps=eps)
+        
     elif opt.opt_type == 'adam':
         enhance_optimizer = torch.optim.Adam(enhance_parameters, lr=lr, betas=(opt.beta1, 0.999))   
         asr_optimizer = torch.optim.Adam(asr_parameters, lr=lr, betas=(opt.beta1, 0.999)) 
@@ -173,10 +178,10 @@ def main():
         else:
             gan_data = pd.DataFrame(columns = ['generator','discriminator'])
     if opt.MCT == True:
-        fbank_path = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
+        fbank_cmvn_file = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
     else:
-        fbank_path = os.path.join(opt.exp_path,'fbank_cmvn.npy')
-    fbank_cmvn = np.load(fbank_path)
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
+    fbank_cmvn = np.load(fbank_cmvn_file)
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
     #fbank_cmvn = fbank_model.compute_cmvn(inputs, input_sizes)
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
@@ -187,14 +192,12 @@ def main():
         enhance_cmvn = torch.FloatTensor(enhance_cmvn)
     else:
         enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model) 
-    sample_rampup = utils.ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)  
-    sche_samp_rate = sample_rampup.update(iters)
     
     enhance_model.train()
     feat_model.train()
-    asr_model.train() 
+    asr_model.train()  
     if opt.isGAN:
-        gan_model.train()    
+        gan_model.train()   
     fstlm = None          	                    
     for epoch in range(start_epoch, opt.epochs):               
         if epoch > opt.shuffle_epoch:
@@ -217,13 +220,12 @@ def main():
             #loss_ctc, loss_att, acc, clean_context, mix_context = asr_model(clean_feat, enhance_feat, targets, input_sizes, target_sizes, sche_samp_rate, enhance_cmvn) 
             clean_feature = feat_model(clean_inputs,fbank_cmvn)
             enhance_feature = feat_model(enhance_out,enhance_cmvn)
-            loss_ctc, loss_att, acc = asr_model(enhance_feature, targets, input_sizes, target_sizes, sche_samp_rate)
+            asr_loss, acc = asr_model(enhance_feature, input_sizes, targets, target_sizes)
             #nbest_hyps = asr_model.recognize(enhance_feature, opt, opt.char_list, rnnlm=rnnlm, fstlm=fstlm)
             #mix_context = nbest_hyps[0]['yseq'][1:]
             #nbest_hyps = asr_model.recognize(clean_feature, opt, opt.char_list, rnnlm=rnnlm, fstlm=fstlm)
             #clean_context = nbest_hyps[0]['yseq'][1:]
             #coral_loss = opt.coral_loss_lambda * CORAL(clean_context, mix_context)              
-            asr_loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
             coral_loss = 0
             loss = asr_loss + enhance_loss + coral_loss
                     
@@ -253,8 +255,8 @@ def main():
                 asr_optimizer.step()                
             
             if opt.isGAN:
-                set_requires_grad([gan_model], True)   
                 gan_model.train()
+                set_requires_grad([gan_model], True)   
                 gan_optimizer.zero_grad()
                 if opt.netD_type == 'pixel':
                     fake_AB = torch.cat((mix_feat, enhance_feat), 2)
@@ -275,14 +277,17 @@ def main():
                     logging.warning('grad norm is nan. Do not update model.')
                 else:
                     gan_optimizer.step()
-                  
+                                               
             iters += 1
             #errors = {'train/loss': loss.item(), 'train/loss_ctc': loss_ctc.item(), 
                       #'train/acc': acc, 'train/loss_att': loss_att.item(), 
                       #'train/enhance_loss': enhance_loss.item(), 'train/coral_loss': coral_loss.item()}
-            errors = {'train/loss': loss.item(), 'train/loss_ctc': loss_ctc.item(), 
-                      'train/acc': acc, 'train/loss_att': loss_att.item(), 
-                      'train/enhance_loss': enhance_loss.item()}
+            errors = {
+                "train/loss": loss.item(),
+                "train/acc": acc,
+                "train/loss_att": asr_loss.item(),
+                'train/enhance_loss': enhance_loss.item()
+            }
             if opt.isGAN:
                 errors['train/loss_D'] = loss_D.item()
                 errors['train/gan_loss'] = opt.gan_loss_lambda * gan_loss.item()  
@@ -302,16 +307,9 @@ def main():
                     gan_data = gan_data.append({'generator':gan_loss_G,'discriminator':loss_D},ignore_index = True)
                 filename='latest'
                 utils.save_checkpoint(state, opt.exp_path, filename=filename)
-                # for name, para in enhance_model.named_parameters():
-                #     logging.info('name.'+str(name))
-                #     logging.info('para.')
-                #     logging.info(para[0:3,0:3])
-                #     logging.info('paramsgrad.')
-                #     logging.info(para.grad[0:3,0:3]) 
-                #     break  
+                    
             if iters % opt.validate_freq == 0:
-                sche_samp_rate = sample_rampup.update(iters)
-                print("iters {} sche_samp_rate {}".format(iters, sche_samp_rate))    
+                print("iters {}".format(iters))    
                 enhance_model.eval() 
                 feat_model.eval() 
                 asr_model.eval()
@@ -319,7 +317,8 @@ def main():
                     gan_model.eval()
                 torch.set_grad_enabled(False)                
                 num_saved_attention = 0 
-                for i, (data) in tqdm(enumerate(val_loader, start=0)):
+                pbar = tqdm(total=len(val_dataset))
+                for i, (data) in enumerate(val_loader, start=0):
                     utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,clean_angles,mix_angles,cmvn = data
                     enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes)                         
                     enhance_feat = feat_model(enhance_out)
@@ -343,39 +342,44 @@ def main():
                         #gan_loss = criterionGAN(gan_model(fake_AB, enhance_cmvn), True)
                         gan_loss = criterionGAN(gan_model(fake_AB), True)
                         enhance_loss += opt.gan_loss_lambda * gan_loss
+        
                         
                     #loss_ctc, loss_att, acc, clean_context, mix_context = asr_model(clean_feat, enhance_feat, targets, input_sizes, target_sizes, 0.0, enhance_cmvn)
                     #val_enhance_feature = feat_model(enhance_out,enhance_cmvn)
-                    loss_ctc,loss_att,acc = asr_model(val_enhance_feature, targets, input_sizes, target_sizes, sche_samp_rate)                     
-                    asr_loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
+                    asr_loss, acc = asr_model(val_enhance_feature, input_sizes, targets, target_sizes)                     
                     enhance_loss = opt.enhance_loss_lambda * enhance_loss
-                    loss = asr_loss + enhance_loss                          
-                    errors = {'val/loss': loss.item(), 'val/loss_ctc': loss_ctc.item(), 
-                              'val/acc': acc, 'val/loss_att': loss_att.item(),
-                              'val/enhance_loss': enhance_loss.item()}
+                    loss = asr_loss + enhance_loss     
+                    pbar.update(opt.batch_size)                     
+                    errors = {
+                        "val/loss": loss.item(),
+                        "val/acc": acc,
+                        "val/att_loss": asr_loss.item(),
+                        'val/enhance_loss': enhance_loss.item()
+                    }
                     if opt.isGAN:        
                         errors['val/gan_loss'] = opt.gan_loss_lambda * gan_loss.item()  
                     visualizer.set_current_errors(errors)
                 
-                    if opt.num_save_attention > 0 and opt.mtlalpha != 1.0:
-                        if num_saved_attention < opt.num_save_attention:
-                            #att_ws = asr_model.calculate_all_attentions(enhance_feat, targets, input_sizes, target_sizes, enhance_cmvn) 
-                            att_ws = asr_model.calculate_all_attentions(val_enhance_feature, targets, input_sizes, target_sizes)                             
-                            for x in range(len(utt_ids)):
-                                att_w = att_ws[x]
-                                utt_id = utt_ids[x]
-                                file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
-                                dec_len = int(target_sizes[x])
-                                enc_len = int(input_sizes[x]) 
-                                visualizer.plot_attention(att_w, dec_len, enc_len, file_name) 
-                                num_saved_attention += 1
-                                if num_saved_attention >= opt.num_save_attention:   
-                                    break 
+                    # if opt.num_save_attention > 0 and opt.mtlalpha != 1.0:
+                    #     if num_saved_attention < opt.num_save_attention:
+                    #         #att_ws = asr_model.calculate_all_attentions(enhance_feat, targets, input_sizes, target_sizes, enhance_cmvn) 
+                    #         att_ws = asr_model.calculate_all_attentions(val_enhance_feature, targets, input_sizes, target_sizes)                             
+                    #         for x in range(len(utt_ids)):
+                    #             att_w = att_ws[x]
+                    #             utt_id = utt_ids[x]
+                    #             file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
+                    #             dec_len = int(target_sizes[x])
+                    #             enc_len = int(input_sizes[x]) 
+                    #             visualizer.plot_attention(att_w, dec_len, enc_len, file_name) 
+                    #             num_saved_attention += 1
+                    #             if num_saved_attention >= opt.num_save_attention:   
+                    #                 break 
                 enhance_model.train()
                 feat_model.train()
                 asr_model.train() 
                 if opt.isGAN:
                     gan_model.train()
+                pbar.close()
                 torch.set_grad_enabled(True)  
 				
                 visualizer.print_epoch_errors(epoch, iters)  
@@ -392,10 +396,10 @@ def main():
                         filename='model.acc.best'                    
                     best_acc = max(best_acc, val_acc)
                     logging.info('best_acc {}'.format(best_acc))  
-                elif opt.criterion == 'loss':
+                elif args.criterion == 'loss':
                     if val_loss > best_loss:
                         logging.info('val_loss {} > best_loss {}'.format(val_loss, best_loss))
-                        opt.eps = utils.adadelta_eps_decay(asr_optimizer, opt.eps_decay)
+                        opt.eps = utils.adadelta_eps_decay(enhance_optimizer, opt.eps_decay)
                     else:
                         filename='model.loss.best'    
                     best_loss = min(val_loss, best_loss)
@@ -411,8 +415,9 @@ def main():
                     state['gan_state_dict'] = gan_model.state_dict()
                 utils.save_checkpoint(state, opt.exp_path, filename=filename)                  
                 visualizer.reset()  
-                enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)  
-    if opt.isGAN:
-        gan_data.to_csv(gan_data_file,index = False)           
+                enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)
+    if opt.isGAN:  
+        gan_data.to_csv(gan_data_file,index = False)
+                
 if __name__ == '__main__':
     main()

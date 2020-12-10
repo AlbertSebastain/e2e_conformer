@@ -14,9 +14,10 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 from options.train_options import TrainOptions
+from model.enhance_model import EnhanceModel
 from model.e2e_model import E2E
 from model.feat_model import FbankModel
-from data.data_loader import SequentialDataset, SequentialDataLoader,BucketingSampler
+from data.mix_data_loader import MixSequentialDataset, MixSequentialDataLoader, BucketingSampler
 #from data. import BucketingSampler
 from utils.visualizer import Visualizer 
 from utils import utils
@@ -29,7 +30,7 @@ torch.cuda.manual_seed(manualSeed)
                                                      
 def main():
     #logging.basicConfig(filename = './traine2e/train.log',level=logging.INFO, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
-    opt = fake_opt.Asr_train()
+    opt = fake_opt.asr_att_retrain()
     #opt = TrainOptions().parse()
         
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
@@ -42,11 +43,11 @@ def main():
     dev_folder = opt.dev_folder
     # data
     logging.info("Building dataset.")
-    train_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, train_folder), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_folder) 
-    val_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, dev_folder), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_folder)    
+    train_dataset = MixSequentialDataset(opt,os.path.join(opt.dataroot,train_folder),os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_folder)
+    val_dataset = MixSequentialDataset(opt,os.path.join(opt.dataroot,dev_folder),os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_folder)
     train_sampler = BucketingSampler(train_dataset,batch_size = opt.batch_size)
-    train_loader = SequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
-    val_loader = SequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
+    train_loader = MixSequentialDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
+    val_loader = MixSequentialDataLoader(val_dataset, batch_size=int(opt.batch_size/2), num_workers=opt.num_workers, shuffle=False)
     opt.idim = train_dataset.get_feat_size()
     opt.odim = train_dataset.get_num_classes()
     opt.char_list = train_dataset.get_char_list()
@@ -56,8 +57,6 @@ def main():
     logging.info("Dataset ready!")
     
     # Setup a model
-    asr_model = E2E(opt)
-    fbank_model = FbankModel(opt)
 
     lr = opt.lr
     eps = opt.eps
@@ -65,29 +64,26 @@ def main():
     start_epoch = opt.start_epoch    
     best_loss = opt.best_loss
     best_acc = opt.best_acc
-    if opt.resume:
-        model_path = os.path.join(opt.works_dir, opt.resume)
-        if os.path.isfile(model_path):
-            package = torch.load(model_path, map_location=lambda storage, loc: storage)
-            lr = package.get('lr', opt.lr)
-            eps = package.get('eps', opt.eps)        
-            best_loss = package.get('best_loss', float('inf'))
-            best_acc = package.get('best_acc', 0)
-            start_epoch = int(package.get('epoch', 0))   
-            iters = int(package.get('iters', 0))
-            
-            acc_report = package.get('acc_report', acc_report)
-            loss_report = package.get('loss_report', loss_report)
-            visualizer.set_plot_report(acc_report, 'acc.png')
-            visualizer.set_plot_report(loss_report, 'loss.png')
-            
-            asr_model = E2E.load_model(model_path, 'asr_state_dict') 
-            fbank_model = FbankModel.load_model(model_path, 'fbank_state_dict') 
-            logging.info('Loading model {} and iters {}'.format(model_path, iters))
+    if (opt.e2e_resume != None) & (opt.enhance_resume != None):
+        e2e_model_path = os.path.join(opt.works_dir, opt.e2e_resume)
+        enhance_model_path = os.path.join(opt.works_dir,opt.enhance_resume)
+        if os.path.isfile(e2e_model_path) & os.path.isfile(enhance_model_path):
+
+            logging.info('Loading model {} and iters {}'.format(e2e_model_path, iters))
+            asr_model = E2E.load_model(e2e_model_path, 'asr_state_dict') 
+            fbank_model = FbankModel.load_model(e2e_model_path, 'fbank_state_dict') 
+            enhance_model = EnhanceModel.load_model(enhance_model_path,'enhance_state_dict')
         else:
-            print("no checkpoint found at {}".format(model_path))                
+            print("no checkpoint found at {}".format(e2e_model_path))  
+
+            
+               
     asr_model.cuda()
     fbank_model.cuda()
+    enhance_model.cuda()
+    #enhance_model.eval()
+    for pa in enhance_model.parameters():
+        pa.requires_grad = False
     print(asr_model)
   
     # Setup an optimizer
@@ -111,16 +107,6 @@ def main():
     # 原先注释
     if os.path.exists(fbank_cmvn_file):
         fbank_cmvn = np.load(fbank_cmvn_file)
-    else:
-        for i, (data) in enumerate(train_loader, start=0):
-            utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
-            fbank_cmvn = fbank_model.compute_cmvn(inputs, input_sizes)
-            if fbank_model.cmvn_processed_num >= fbank_model.cmvn_num:
-                #if fbank_cmvn is not None:
-                fbank_cmvn = fbank_model.compute_cmvn(inputs, input_sizes)
-                np.save(fbank_cmvn_file, fbank_cmvn)
-                print('save fbank_cmvn to {}'.format(fbank_cmvn_file))
-                break
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
     # 注释到此
                      
@@ -129,9 +115,10 @@ def main():
             print("Shuffling batches for the following epochs")
             train_sampler.shuffle(epoch)                    
         for i, (data) in enumerate(train_loader, start=(iters*opt.batch_size)%len(train_dataset)):
-            utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
+            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, mix_angles, clean_agles, cmvn = data
+            enhance_out = enhance_model(mix_inputs,mix_log_inputs,input_sizes)
             #utt_ids, spk_ids, inputs, log_inputs, targets = data
-            fbank_features = fbank_model(inputs, fbank_cmvn)
+            fbank_features = fbank_model(enhance_out, fbank_cmvn)
             #utt_ids, spk_ids, fbank_features, targets, input_sizes, target_sizes = data
             loss_ctc, loss_att, acc = asr_model(fbank_features, targets, input_sizes, target_sizes, sche_samp_rate) 
             loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
@@ -166,8 +153,9 @@ def main():
                 torch.set_grad_enabled(False)
                 num_saved_attention = 0
                 for i, (data) in tqdm(enumerate(val_loader, start=0)):
-                    utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
-                    fbank_features = fbank_model(inputs, fbank_cmvn)
+                    utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, mix_angles, clean_agles, cmvn = data
+                    enhance_out = enhance_model(mix_inputs,mix_log_inputs,input_sizes)
+                    fbank_features = fbank_model(enhance_out, fbank_cmvn)
                     #utt_ids, spk_ids, fbank_features, targets, input_sizes, target_sizes = data
                     loss_ctc, loss_att, acc = asr_model(fbank_features, targets, input_sizes, target_sizes, 0.0) 
                     loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att                            

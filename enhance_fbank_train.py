@@ -57,8 +57,8 @@ def main():
 
     # data
     logging.info("Building dataset.")
-    train_set = 'train'
-    dev_set = 'dev'
+    train_set = opt.train_folder
+    dev_set = opt.dev_folder
     train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_set), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_set) 
     val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, dev_set), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_set)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
@@ -106,7 +106,11 @@ def main():
     # Training		    
     #enhance_cmvn = compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model)  
     enhance_model.train()
-    feat_model.train()               
+    feat_model.train()       
+    # fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
+    # if os.path.exists(fbank_cmvn_file):
+    #     fbank_cmvn = np.load(fbank_cmvn_file)
+    #     fbank_cmvn = torch.FloatTensor(fbank_cmvn)        
     for epoch in range(start_epoch, opt.epochs):        
         if epoch > opt.shuffle_epoch:
             print("Shuffling batches for the following epochs")
@@ -122,10 +126,6 @@ def main():
                     mix_log_inputs = mix_log_inputs[:, :t_step, :] 
                 mix_log_inputs = mix_log_inputs.unsqueeze(1)                
             enhance_out = enhance_model(mix_inputs, mix_log_inputs, input_sizes) 
-            fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
-            if os.path.exists(fbank_cmvn_file):
-                fbank_cmvn = np.load(fbank_cmvn_file)
-                fbank_cmvn = torch.FloatTensor(fbank_cmvn)
             enhance_feat = feat_model(enhance_out)
             clean_feat = feat_model(clean_inputs)
             if opt.enhance_loss_type == 'L2':

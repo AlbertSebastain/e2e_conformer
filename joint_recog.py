@@ -25,6 +25,8 @@ from data.mix_data_loader import MixSequentialDataset, MixSequentialDataLoader, 
 from utils.visualizer import Visualizer 
 from utils import utils
 
+def str2bool(sr1):
+    return True if sr1.lower() == 'true' else False
 opt = TestOptions().parse()
 if opt.recog_dir == '':
     opt = fake_opt.joint_recog()
@@ -32,7 +34,6 @@ manualSeed = random.randint(1, 10000)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 torch.cuda.manual_seed(manualSeed)  
-
 # logging info
 if opt.verbose == 1:
     logging.basicConfig(
@@ -46,9 +47,11 @@ else:
     logging.warning("Skip DEBUG/INFO messages")
     
 # data
+if type(opt.MCT) == str:
+    opt.MCT = str2bool(opt.MCT)
 logging.info("Building dataset.")
-type_data = opt.recog_data
-recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),type_data,'mix') 
+type_data = opt.test_folder
+recog_dataset = SequentialDataset(opt, opt.recog_dir, os.path.join(opt.dict_dir, 'train_units.txt'),type_data,'mix',mct = opt.MCT) 
 #recog_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, type_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data)
 recog_loader = SequentialDataLoader(recog_dataset, batch_size=1, num_workers=opt.num_workers, shuffle=False)
 #recog_loader = MixSequentialDataLoader(recog_dataset, batch_size=1, num_workers=opt.num_workers, shuffle=False)
@@ -164,8 +167,10 @@ def main():
     else:
         rnnlm = None
         fstlm = None
-    
-    fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
+    if opt.MCT:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_mct_cmvn.npy')
+    else:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
     if os.path.exists(fbank_cmvn_file):
         fbank_cmvn = np.load(fbank_cmvn_file)
         fbank_cmvn = torch.FloatTensor(fbank_cmvn)
@@ -174,9 +179,9 @@ def main():
             
     torch.set_grad_enabled(False)
     new_json = {}
-    cmvn_path = os.path.join(opt.exp_path,'joint_train','enhance_cmvn.npy')
-    enhance_cmvn = np.load(cmvn_path)
-    enhance_cmvn = torch.FloatTensor(enhance_cmvn)
+    #cmvn_path = os.path.join(opt.exp_path,'joint_train','enhance_cmvn.npy')
+    #enhance_cmvn = np.load(cmvn_path)
+    #enhance_cmvn = torch.FloatTensor(enhance_cmvn)
     for i, (data) in enumerate(recog_loader, start=0):
         utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
         #utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs,mix_log_inputs, cos_angles, targets, input_sizes, target_sizes, clean_angles, mix_angles, cmvn = data
@@ -185,15 +190,13 @@ def main():
         #log_inputs = mix_log_inputs
         print(name)
         enhance_outputs = enhance_model(inputs, log_inputs, input_sizes)
-        logging.info(inputs[0,0,1:10])
-        logging.info(log_inputs[0,0,1:10])
         rewav_type = None
         if rewav_type == True:
             path = '/usr/home/shi/projects/data_aishell/data/wavfile/initial'
             rewav(path,name,inputs[0],mix_angles[0],type_wav = 'initial')
             rewav(path,name,enhance_outputs[0],mix_angles[0],type_wav = 'enhance')
         feats = feat_model(enhance_outputs, fbank_cmvn) 
-        print(feats)
+        #print(feats)
         #logging.info(inputs[0,0,1:10])
         #logging.info(enhance_outputs[0,0,1:10])   
         #feats = feat_model(clean_inputs,fbank_cmvn)

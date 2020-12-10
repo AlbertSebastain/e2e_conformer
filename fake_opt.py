@@ -90,7 +90,7 @@ class Asr_train:
         self.num_utt_cmvn = 20000
 
         self.grad_clip = 5
-        self.print_freq = 1000
+        self.print_freq = 500
         self.validate_freq = 3000
         self.num_save_attention = 0.5
         self.criterion = "acc"
@@ -118,7 +118,17 @@ class Asr_train:
         self.train_folder = 'mix_train_clean_match'
         self.dev_folder = 'mix_dev_clean_match'
         # self.validate_freq = 1
-
+class asr_att_retrain(Asr_train):
+    def __init__(self):
+        super(asr_att_retrain,self).__init__()
+        self.exp_path = '/usr/home/shi/projects/e2e_speech_project/data_model/asr_e2e_mct_retrain'
+        self.name = 'asr_e2e_mct_retrain'
+        self.works_dir = self.exp_path
+        self.train_folder = 'mix_train_clean_match'
+        self.dev_folder = 'mix_dev_clean_match'
+        self.e2e_resume = 'model.e2e.att.best'
+        self.enhance_resume = 'model.loss.enhance.best'
+        self.MCT = True
 class asr_conf(Asr_train):
     def __init__(self):
         super(asr_conf,self).__init__()
@@ -155,7 +165,7 @@ class asr_conf(Asr_train):
         self.lr = 0.02
         self.epochs = 50
         self.print_freq = 500
-        self.validate_freq = 3000
+        self.validate_freq = 8000
         self.mtlalpha = 0.3
         self.lsm_weight = 0.1
         self.opt_type = 'noam'
@@ -168,10 +178,22 @@ class asr_conf(Asr_train):
         self.batch_size = 15
         self.maxlen_in = 512
         self.maxlen_out = 150
-        self.resume = 'model.acc.best'
+        self.resume = None
         #self.resume = None
         self.name = 'asr_e2e_mct_conformtrain'
         self.MCT = True
+class asr_retrain_conf(asr_conf):
+    def __init__(self):
+        super(asr_retrain_conf,self).__init__()
+        self.exp_path = '/usr/home/shi/projects/e2e_speech_project/data_model/asr_conformer_mct_retrain'
+        self.name = 'asr_conformer_mct_retrain'
+        self.works_dir = self.exp_path
+        self.train_folder = 'mix_train_clean_match'
+        self.dev_folder = 'mix_dev_clean_match'
+        self.e2e_resume = 'model.e2e.conformer.best'
+        self.enhance_resume = 'model.loss.enhance.best'
+        self.MCT = True
+        self.epochs = 20
 class asr_recog_conf(asr_conf):
     def __init__(self):
         super(asr_recog_conf,self).__init__()
@@ -228,11 +250,45 @@ class Enhance_base_train(Asr_train):
         self.enhance_resume = None
         #self.name = "aishell"+"_enhancement"+"_"+str(self.enhance_layers)+"_"+str(self.etype)+"_"+str(self.enhance_units)+"_"+str(self.enhance_projs)+"_"+self.enhance_loss_type+"_"+str(self.enhance_dropout_rate)
         self.name = "enhance_base"
+class Enhance_base_train_conf(asr_conf):
+    def __init__(self):
+        super(Enhance_base_train_conf, self).__init__()
+
+
+        self.feat_type = "kaldi_magspec"
+        self.enhance_layers = 3
+        self.enhance_units = 128
+        self.enhance_projs = 128
+        self.epochs = 30
+        self.print_freq = 100
+        self.num_saved_specgram = 3
+        self.enhance_nonlinear_type = 'sigmoid'
+        self.enhance_loss_type = 'L2'
+        self.enhance_opt_type = 'gan_fbank'
+        self.enhance_dropout_rate = 0.0
+        self.enhance_input_nc = 1
+        self.enhance_output_nc = 1
+        self.enhance_ngf = 64
+        self.enhance_norm = 'batch'
+        self.L1_loss_lambda = 1.0
+        self.batch_size = 40
+        self.etype = 'blstmp'
+        self.idim = 257
+        self.odim = self.idim
+
+        self.exp_path = "/usr/home/shi/projects/e2e_speech_project/data_model/enhance_base"
+        self.works_dir = self.exp_path
+        self.enhance_resume = None
+        #self.name = "aishell"+"_enhancement"+"_"+str(self.enhance_layers)+"_"+str(self.etype)+"_"+str(self.enhance_units)+"_"+str(self.enhance_projs)+"_"+self.enhance_loss_type+"_"+str(self.enhance_dropout_rate)
+        self.name = "enhance_base"
 class e2e_test(Asr_train):
     def __init__(self):
         super(e2e_test,self).__init__()
-        self.recog_dir = "/usr/home/shi/projects/data_aishell/data/test"
-        self.enhance_dir = "/usr/home/shi/projects/data_aishell/data/test"
+        self.recog_dir = "/usr/home/shi/projects/data_aishell/data/mix_test_unmatch"
+        #self.enhance_dir = "/usr/home/shi/projects/data_aishell/data/test"
+        self.save_dir = './checkpoints_new/recog_multitype'
+        self.name = os.path.join(self.save_dir,'recog_asr_model_mix_test_unmatch')
+        self.test_folder = "mix_test_unmatch"
         self.nj = 1
         self.nbest = 12
         self.beam_size = 12
@@ -249,27 +305,47 @@ class e2e_test(Asr_train):
 class joint_recog(e2e_test):
     def __init__(self):
         super(joint_recog,self).__init__()
-        self.exp_path = "/usr/home/shi/projects/e2e_speech_project/data_model"
-        self.enhance_resume = '/usr/home/shi/projects/e2e_speech_project/data_model/enhance_base/model.loss.best'
+        self.save_dir = './checkpoints_new/recog_multitype'
+        #self.exp_path = "/usr/home/shi/projects/e2e_speech_project/data_model"
+        self.enhance_resume = '/usr/home/shi/projects/e2e_speech_project/data_model/base_fbank_train_match_noise/model.loss.best'
         self.e2e_resume = '/usr/home/shi/projects/e2e_speech_project/data_model/asr_model/model.acc.best'
         self.works_dir = '.'
         self.verbose = 1
-        self.recog_data = 'test'
-        self.recog_dir = '/usr/home/shi/projects/data_aishell/data/mix_test'
-        self.name = 'joint_decode_with_no_update_cmvn_for_try'
+        self.test_folder = 'mix_test_unmatch'
+        self.recog_dir = '/usr/home/shi/projects/data_aishell/data/mix_test_unmatch'
+        self.name = os.path.join(self.save_dir,'recog_enhance_fbank_asr_model_unmatch')
+        self.MCT = False
         #self.rnnlm = "checkpoints1/train_rnnlm_k/rnnlm.model.best"
+class joint_recog_conformer(asr_recog_conf):
+    def __init__(self):
+        super(joint_recog_conformer,self).__init__()
+        self.save_dir = './checkpoints_new/test'
+        self.name = os.path.join(self.save_dir,'recog_enhance_fbank_conformer_match')
+        self.test_folder = "mix_test_unmatch"
+        #self.enhance_resume = '/usr/home/shi/projects/e2e_speech_project/data_model/base_fbank_train_match_noise/model.loss.best'
+        #self.e2e_resume = '/usr/home/shi/projects/e2e_speech_project/data_model/conformer/model.acc.best'
+        self.enhance_resume = ''
+        self.e2e_resume = ''
+        self.joint_resume = "/usr/home/shi/projects/e2e_speech_project/data_model/asr_conf_joint_train/model.acc.best"
+        self.works_dir = '.'
+        self.verbose = 1
+        self.recog_dir = os.path.join('/usr/home/shi/projects/data_aishell/data',self.test_folder)
+        self.MCT = False
 class Enhance_base_fbank_train(Enhance_base_train):
     def __init__(self):
         super(Enhance_base_fbank_train,self).__init__()
         #self.name = "aishell"+"_enhancement"+"_fbank_train"+str(self.enhance_layers)+"_"+str(self.etype)+"_"+str(self.enhance_units)+"_"+str(self.enhance_projs)+"_"+self.enhance_loss_type+"_"+str(self.enhance_dropout_rate)
-        self.name = 'enhance_fbank_no_fbank'
-        self.exp_path = "/usr/home/shi/projects/e2e_speech_project/data_model/base_fbank_train_nofbank"
+        self.name = 'enhance_fbank_match_noise'
+        self.exp_path = "/usr/home/shi/projects/e2e_speech_project/data_model/base_fbank_train_match_noise"
         self.works_dir = self.exp_path
         self.num_saved_specgram = 6
         self.enhance_resume ='latest'
-        self.enhance_resume = 'latest'
-        self.epochs = 21
+        #self.enhance_resume = None
+        self.print_freq = 1000
+        self.epochs = 20
         self.validate_freq = 3000
+        self.train_folder = 'mix_train_match'
+        self.dev_folder = 'mix_dev_match'
 class joint_recog_check(joint_recog):
     def __init__(self):
         super(joint_recog_check,self).__init__()
@@ -304,12 +380,12 @@ class Enhance_gan_train(Enhance_base_train):
 class joint_train(Enhance_base_train):
     def __init__(self):
         super(joint_train,self).__init__()
-        self.name = 'aishell_joint_train'
-        self. exp_path = '/usr/home/shi/projects/e2e_speech_project/data_model/joint_train'
+        self.name = 'asr_att_mct_joint_train'
+        self.exp_path = '/usr/home/shi/projects/e2e_speech_project/data_model/asr_att_mct_joint_train'
         self.works_dir = self.exp_path
         self.num_save_attention = 0.5
-        self.enhance_resume = 'model.fbank.best'
-        self.asr_resume = 'model.e2e.best'
+        self.enhance_resume = 'model.loss.enhance.best'
+        self.asr_resume = 'model.e2e.att.best'
         self.joint_resume = None
         self.epochs = 20
         self.validate_freq = 3000
@@ -317,11 +393,45 @@ class joint_train(Enhance_base_train):
         self.norm_D = 'batch'
         self.no_lsgan = False
         self.input_nc = 1
+        self.print_freq = 500
+        self.n_layers_D = 3
+        self.batch_size = 30
+        self.netD_type = 'n_layers'
+        self.gan_loss_lambda = 0
+        self.mtlalpha = 0.5
+        self.enhance_loss_lambda = 5
+        self.isGAN = False
+        self.gan_resume = None
+        self.train_folder = 'mix_train_clean_match'
+        self.dev_folder = 'mix_dev_clean_match'
+        self.MCT = False
+class conf_joint_train(Enhance_base_train_conf):
+    def __init__(self):
+        super(conf_joint_train,self).__init__()
+        self.name = 'asr_conf_joint_train'
+        self.exp_path = '/usr/home/shi/projects/e2e_speech_project/data_model/asr_conf_joint_train'
+        self.works_dir = self.exp_path
+        self.num_save_attention = 0.5
+        self.enhance_resume = 'model.loss.enhance.best'
+        self.asr_resume = 'model.e2e.conformer.best'
+        self.joint_resume = None
+        self.batch_size = 15
+        self.epochs = 20
+        self.print_freq = 500
+        self.validate_freq = 8000
+        self.ndf = 32
+        self.norm_D = 'batch'
+        self.no_lsgan = False
+        self.input_nc = 1
+        self.opt_type = 'noam'
         self.n_layers_D = 3
         self.netD_type = 'n_layers'
-        self.gan_loss_lambda = 1.0
+        self.gan_loss_lambda = 0
         self.mtlalpha = 0.5
-        self.enhance_loss_lambda = 1.0
-        self.isGAN = True
-        self.gan_resume = 'model.gan.best'
-
+        self.enhance_loss_lambda = 5
+        self.beta1 = 0.9
+        self.isGAN = False
+        self.gan_resume = None
+        self.train_folder = 'mix_train_match'
+        self.dev_folder = 'mix_dev_match'
+        self.MCT = False
