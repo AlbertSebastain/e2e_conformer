@@ -1,0 +1,5 @@
+#exp_path: ./data_model/aishell_asr_model
+dataroot: /usr/home/shi/projects/data_aishell/data
+#name: aishell_asr_model
+#checkpoints_dir: ./checkpoints_new
+dict_dir: /usr/home/shi/projects/data_aishell/data/lang/phones

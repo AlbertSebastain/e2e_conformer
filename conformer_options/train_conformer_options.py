@@ -1,10 +1,9 @@
-from .base_options import BaseOptions
-from distutils.util import strtobool
+from .base_conformer_options import Base_conformer_Options
 
 
-class TrainOptions(BaseOptions):
+class Train_conformer_Options(Base_conformer_Options):
     def initialize(self):
-        BaseOptions.initialize(self)
+        Base_conformer_Options.initialize(self)
         # optimization related
         self.parser.add_argument('--opt_type', default='adadelta', type=str, choices=['adadelta', 'adam'], help='Optimizer')
         self.parser.add_argument('--lr', type=float, default=0.005, help='learning rate, default=0.0002')
@@ -20,7 +19,7 @@ class TrainOptions(BaseOptions):
         self.parser.add_argument('--grad-clip', default=5, type=float, help='Gradient norm threshold to clip')
         self.parser.add_argument('--num-save-attention', default=3, type=int, help='Number of samples of attention to be saved')   
         self.parser.add_argument('--num-saved-specgram', default=3, type=int, help='Number of samples of specgram to be saved')               
-        self.parser.add_argument('--MCT',default=False,type=strtobool,help="if input data MCT")
+        self.parser.add_argument('--MCT',action="store_true",help="if input data MCT")
         # debug related   
         self.parser.add_argument('--validate_freq', type=int, default=8000, help='how many batches to validate the trained model')   
         self.parser.add_argument('--print_freq', type=int, default=500, help='how many batches to print the trained model')         

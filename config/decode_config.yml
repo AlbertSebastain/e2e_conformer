@@ -1,0 +1,8 @@
+lmtype: "rnnlm"
+beam_size: 12
+nbest: 12
+penalty: 0.0
+maxlenratio: 0.0
+minlenration: 0.0
+ctc_weight: 0.3
+lm_weight: 0.2

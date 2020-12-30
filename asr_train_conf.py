@@ -23,6 +23,7 @@ from transformer.nets_utils import pad_list
 #from transformer.e2e_asr_transformer import E2E
 from e2e_asr_conformer import E2E
 #from config_transformer import TrainOptions
+from conformer_options.train_conformer_options import Train_conformer_Options
 import fake_opt
 from model.feat_model import FbankModel
 import datetime
@@ -34,8 +35,9 @@ torch.cuda.manual_seed(SEED)
 
 def train():
     # step0: 导入参数，cuda 和 logging
-    #opt = TrainOptions().parse()
-    opt = fake_opt.asr_conf()
+    opt = Train_conformer_Options().parse()
+    if(opt.name == ''):
+        opt = fake_opt.asr_conf()
     #opt = fake_opt.asr_transf()
 
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
@@ -45,12 +47,6 @@ def train():
     acc_report = visualizer.add_plot_report(["train/acc", "val/acc"], "acc.png")
     loss_report = visualizer.add_plot_report(["train/loss", "val/loss"], "loss.png")
 
-    # step1: 数据
-    #train_dataset = CleanDataset(opt, "train")  # test train dev
-    #train_sampler = DataSampler(train_dataset, opt.batch_size)
-    #train_loader = CleanDataLoader(train_dataset, num_workers=opt.num_workers, batch_sampler=train_sampler)
-    #val_dataset = CleanDataset(opt, "dev")  # test train dev
-    #val_loader = CleanDataLoader(val_dataset, batch_size=int(opt.batch_size / 2), num_workers=opt.num_workers)
     train_fold = opt.train_folder
     dev_fold = opt.dev_folder
     train_dataset = SequentialDataset(opt, os.path.join(opt.dataroot, train_fold), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = 'train',mct = opt.MCT) 
@@ -108,12 +104,12 @@ def train():
     parameters = filter(lambda p: p.requires_grad, itertools.chain(asr_model.parameters()))
     optimizer = torch.optim.Adam(parameters,lr = lr,betas = (opt.beta1,0.98), eps=eps)
     if opt.opt_type == 'noam':
-        optimizer = NoamOpt(asr_model.adim, 1, 25000, optimizer,iters)
+        optimizer = NoamOpt(asr_model.adim, opt.transformer_lr, opt.transformer_warmup_steps, optimizer,iters)
     asr_model.cuda()
     print(asr_model)
     asr_model.train()
-    sample_rampup = ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)
-    sche_samp_rate = sample_rampup.update(iters)
+    #sample_rampup = ScheSampleRampup(opt.sche_samp_start_iter, opt.sche_samp_final_iter, opt.sche_samp_final_rate)
+    #sche_samp_rate = sample_rampup.update(iters)
     #print(opt.MCT)
     if opt.MCT == True:
         fbank_cmvn_file = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
@@ -202,8 +198,8 @@ def train():
                 #     logging.info('lr = {}'.format(op['lr']))
             # evalutation
             if iters % opt.validate_freq == 0:
-                sche_samp_rate = sample_rampup.update(iters)
-                print("iters {} sche_samp_rate {}".format(iters, sche_samp_rate))
+                #sche_samp_rate = sample_rampup.update(iters)
+                #print("iters {} sche_samp_rate {}".format(iters, sche_samp_rate))
                 asr_model.eval()
                 torch.set_grad_enabled(False)
                 # num_saved_attention = 0

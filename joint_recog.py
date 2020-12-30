@@ -167,7 +167,10 @@ def main():
     else:
         rnnlm = None
         fstlm = None
-    if opt.MCT:
+    if opt.joint_resume != None:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'enhance_cmvn.npy')
+
+    elif opt.MCT:
         fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_mct_cmvn.npy')
     else:
         fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')

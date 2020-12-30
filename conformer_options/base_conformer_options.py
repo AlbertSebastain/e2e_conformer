@@ -1,12 +1,12 @@
 import argparse
 import os
 from utils import utils
+from distutils.util import strtobool
 import yaml
 import torch
-from distutils.util import strtobool
 
 
-class BaseOptions():
+class Base_conformer_Options():
     def __init__(self):
         self.parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         self.initialized = False
@@ -14,7 +14,13 @@ class BaseOptions():
     def initialize(self):
         # general configuration
         self.parser.add_argument('--works_dir', help='path to work', default='.')
+        self.parser.add_argument("--feat_type",type=str,default="kaldi_magspec",help="feat_type")
+        self.parser.add_argument("--delta_order", type=int, default=0, help="input delta-order")
         self.parser.add_argument('--dataroot', help='path (should have subfolders train, dev, test)')
+        self.parser.add_argument('--left_context_width', type=int, default=0, help='input left_context_width-width')
+        self.parser.add_argument('--right_context_width', type=int, default=0, help='input right_context_width')
+        self.parser.add_argument('--normalize_type', type=int, default=1, help='normalize_type') 
+        self.parser.add_argument('--num_utt_cmvn', type=int, help='the number of utterances for cmvn', default=20000)
         self.parser.add_argument('--dict_dir', default='/home/bliu/SRC/workspace/e2e/data/mix_aishell/lang_1char/', help='path to dict')
         self.parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
         self.parser.add_argument('--name', type=str, default='', help='name of the experiment.')
@@ -22,53 +28,88 @@ class BaseOptions():
         self.parser.add_argument('--resume', default=None, type=str, metavar='PATH', help='path to latest checkpoint (default: none)')   
         self.parser.add_argument('--enhance_resume', default=None, type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
         self.parser.add_argument('--asr_resume', default=None, type=str, metavar='PATH', help='path to latest checkpoint (default: none)')  
-        self.parser.add_argument('--joint_resume', default=None, type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
-        self.parser.add_argument('--gan_resume',default=None,type=str,metavar='PATH',help='path to latest checkpoint (defualt: none)')            
+        self.parser.add_argument('--joint_resume', default=None, type=str, metavar='PATH', help='path to latest checkpoint (default: none)')     
+        self.parser.add_argument("--gan_resume",default=None,type=str,metavar="PATH")       
         self.parser.add_argument('--num_workers', default=4, type=int, help='Number of workers used in data-loading')
         self.parser.add_argument('--train_folder',default='train',type=str,help='name of train folder')
         self.parser.add_argument('--dev_folder',default='dev',type=str,help="name of dev folder")
-        # use yaml config
-        self.parser.add_argument('--config_file',default=None,action = 'append',type = str,help='use yaml set arguments')
-        # input features
-        self.parser.add_argument('--feat_type', type=str, default='kaldi_magspec', help='feat_type')   
-        self.parser.add_argument('--left_context_width', type=int, default=0, help='input left_context_width-width')
-        self.parser.add_argument('--right_context_width', type=int, default=0, help='input right_context_width')
-        self.parser.add_argument('--delta_order', type=int, default=0, help='input delta-order')
-        self.parser.add_argument('--normalize_type', type=int, default=1, help='normalize_type')        
-        self.parser.add_argument('--num_utt_cmvn', type=int, help='the number of utterances for cmvn', default=20000)
-        self.parser.add_argument('--num_utt_per_loading', type=int, help='the number of utterances one loading', default=200)
-        self.parser.add_argument('--mix_noise', dest='mix_noise', action='store_true', help='mix_noise')        
-        self.parser.add_argument('--lowSNR', type=float, default=5, help='lowSNR')
-        self.parser.add_argument('--upSNR', type=float, default=30, help='upSNR') 
         self.parser.add_argument('--exp_path',type=str,default = None,help = 'exp_dir')
-        # encoder
-        self.parser.add_argument('--etype', default='vggblstmp', type=str, choices=['blstm','blstmp','cnnblstmp','cnnblstm', 'vggblstmp','vggblstm'], 
-                                            help='Type of encoder architecture')
-        self.parser.add_argument('--elayers', default=4, type=int, help='Number of encoder layers')
-        self.parser.add_argument('--eunits', '-u', default=320, type=int, help='Number of encoder hidden units')
-        self.parser.add_argument('--eprojs', default=320, type=int, help='Number of encoder projection units')
-        self.parser.add_argument('--subsample', default='1_1_1_1_1', type=str, help='Subsample input frames x_y means subsample every x frame at 1st layer y at 2nd.')
-        self.parser.add_argument('--subsample-type', default='skip', type=str, choices=['skip','maxpooling'], help='subsample-type')
-        
-        # attention
-        self.parser.add_argument('--atype', default='location', type=str, choices=['noatt', 'dot', 'add', 'location', 'coverage', 'coverage_location', 'location2d', 
-                                 'location_recurrent', 'multi_head_dot', 'multi_head_add', 'multi_head_loc', 'multi_head_multi_res_loc'], 
-                                 help='Type of attention architecture')
-        self.parser.add_argument('--adim', default=320, type=int, help='Number of attention transformation dimensions')
-        self.parser.add_argument('--aact-fuc', default='softmax', type=str, choices=['softmax','sigmoid','sigmoid_softmax'], help='out type')
-        self.parser.add_argument('--awin', default=5, type=int, help='Window size for location2d attention')
-        self.parser.add_argument('--aheads', default=4, type=int, help='Number of heads for multi head attention')
-        self.parser.add_argument('--aconv-chans', default=10, type=int, help='Number of attention convolution channels(negative indicates no location-aware attention)')
-        self.parser.add_argument('--aconv-filts', default=100, type=int, help='Number of attention convolution filters(negative indicates no location-aware attention)')
-        
-        # decoder
-        self.parser.add_argument('--dtype', default='lstm', type=str, choices=['lstm'], help='Type of decoder network architecture')
-        self.parser.add_argument('--dlayers', default=1, type=int, help='Number of decoder layers')
-        self.parser.add_argument('--dunits', default=300, type=int, help='Number of decoder hidden units')
-        self.parser.add_argument('--mtlalpha', default=0.5, type=float, help='Multitask learning coefficient, alpha: alpha*ctc_loss + (1-alpha)*att_loss ')
-        self.parser.add_argument('--lsm-type', default='', type=str, choices=['', 'unigram'], help='Apply label smoothing with a specified distribution type')
-        self.parser.add_argument('--lsm-weight', default=0.0, type=float, help='Label smoothing weight')
-        self.parser.add_argument('--fusion', default='', type=str, help='Type of decoder fusion architecture')
+        self.parser.add_argument("--mtlalpha",type = float, default = 0.0)
+        # use yaml config
+        self.parser.add_argument('--config_file',default=None,type=str,action = 'append',help="use yaml file to set arguments")
+        # input features
+        self.parser.add_argument("--transformer-init",type=str,default="pytorch",
+            choices=[
+                "pytorch",
+                "xavier_uniform",
+                "xavier_normal", 
+                "kaiming_uniform",
+                "kaiming_normal",
+                ]
+                ,help="how to initialize transformer parameters",)
+        self.parser.add_argument("--transformer-input-layer",type=str,default="conv2d",
+            choices=[
+                "conv2d",
+                "linear", 
+                "embed"
+                ]
+                ,help="transformer input layer type",)
+        self.parser.add_argument("--transformer-attn-dropout-rate",default=None,type=float,help="dropout in transformer attention. use --dropout-rate if None is set",)
+        self.parser.add_argument("--transformer-lr",default=10.0,type=float,help="Initial value of learning rate",)
+        self.parser.add_argument("--transformer-warmup-steps",default=25000,type=int,help="optimizer warmup steps",)
+        self.parser.add_argument("--transformer-length-normalized-loss",default=True,type=strtobool,help="normalize loss by length",)
+        self.parser.add_argument("--transformer-encoder-selfattn-layer-type",type=str,default="selfattn",
+            choices=[
+                "selfattn",
+                "rel_selfattn",
+                "lightconv",
+                "lightconv2d",
+                "dynamicconv",
+                "dynamicconv2d",
+                "light-dynamicconv2d",
+                ],
+                help="transformer encoder self-attention layer type",)
+        self.parser.add_argument("--transformer-decoder-selfattn-layer-type",type=str,default="selfattn",
+            choices=[
+                "selfattn",
+                "lightconv",
+                "lightconv2d",
+                "dynamicconv",
+                "dynamicconv2d",
+                "light-dynamicconv2d",
+                ],
+                help="transformer decoder self-attention layer type",)
+        self.parser.add_argument("--wshare",default=4,type=int,help="Number of parameter shargin for lightweight convolution",)
+        self.parser.add_argument("--ldconv-encoder-kernel-length",default="21_23_25_27_29_31_33_35_37_39_41_43",type=str,
+            help="kernel size for lightweight/dynamic convolution: "
+            'Encoder side. For example, "21_23_25" means kernel length 21 for '
+            "First layer, 23 for Second layer and so on.",)
+        self.parser.add_argument("--ldconv-decoder-kernel-length",default="11_13_15_17_19_21",type=str,
+            help="kernel size for lightweight/dynamic convolution: "
+            'Decoder side. For example, "21_23_25" means kernel length 21 for '
+            "First layer, 23 for Second layer and so on.",)
+        self.parser.add_argument("--ldconv-usebias",type=strtobool,default=False,help="use bias term in lightweight/dynamic convolution",)
+        self.parser.add_argument("--dropout-rate",default=0.0,type=float,help="Dropout rate for the encoder",)
+        self.parser.add_argument("--decoder_mode",default = None)
+        self.parser.add_argument("--ctc_type",default = "warpctc",type=str)
+        self.parser.add_argument("--report_cer",default = False, type = strtobool)
+        self.parser.add_argument("--report_wer",default = False, type = strtobool)
+        self.parser.add_argument("--elayers",default=4,type=int,
+            help="Number of encoder layers (for shared recognition part "
+            "in multi-speaker asr mode)",)
+        self.parser.add_argument("--eunits","-u",default=300,type=int,help="Number of encoder hidden units",)
+        # Attention
+        self.parser.add_argument("--adim",default=320,type=int,help="Number of attention transformation dimensions",)
+        self.parser.add_argument("--aheads",default=4,type=int,help="Number of heads for multi head attention",)
+        # Decoder
+        self.parser.add_argument("--dlayers", default=1, type=int, help="Number of decoder layers")
+        self.parser.add_argument("--dunits", default=320, type=int, help="Number of decoder hidden units")
+        self.parser.add_argument("--transformer-encoder-pos-enc-layer-type",type=str,default="abs_pos",choices=["abs_pos", "scaled_abs_pos", "rel_pos"],help="transformer encoder positional encoding layer type",)
+        self.parser.add_argument("--transformer-encoder-activation-type",type=str,default="swish",choices=["relu", "hardtanh", "selu", "swish"],help="transformer encoder activation function type",)
+        self.parser.add_argument("--macaron-style",default=False,type=strtobool,help="Whether to use macaron style for positionwise layer",)
+    # CNN module
+        self.parser.add_argument("--use-cnn-module",default=False,type=strtobool,help="Use convolution module or not",)
+        self.parser.add_argument("--cnn-module-kernel",default=31,type=int,help="Kernel size of convolution module.",)
         
         # enhance model
         self.parser.add_argument('--enhance_type', default='blstm', type=str, 
@@ -88,7 +129,7 @@ class BaseOptions():
         self.parser.add_argument('--L1_loss_lambda', default=1.0, type=float, help='L1_loss_lambda')
         self.parser.add_argument('--idim',default=257,type=int)
         self.parser.add_argument('--odim',default=257,type=int)
-        self.parser.add_argument('--isGAN',default=False, type = strtobool)
+        self.parser.add_argument('--isGAN',action="store_true")
         
         # gan model
         self.parser.add_argument('--gan_loss_lambda', default=1.0, type=float, help='gan_loss_lambda')
@@ -97,7 +138,7 @@ class BaseOptions():
         self.parser.add_argument('--n_layers_D', type=int, default=3, help='only used if netD==n_layers')
         self.parser.add_argument('--ndf', type=int, default=64, help='# of discrim filters in first conv layer')
         self.parser.add_argument('--norm_D', type=str, default='batch', help='instance normalization or batch normalization [batch | norm | none]')        
-        self.parser.add_argument('--no_lsgan', default=False,type=strtobool, help='do *not* use least square GAN, if false, use vanilla GAN')
+        self.parser.add_argument('--no_lsgan', action='store_true', help='do *not* use least square GAN, if false, use vanilla GAN')
         self.parser.add_argument('--gan_resumne',type = str, default= None, help = 'the model of gan')
         
         # fbank model
@@ -105,11 +146,10 @@ class BaseOptions():
         self.parser.add_argument('--fbank-opti-type', type=str, default='frozen', choices=['frozen', 'train'], help='fbank-opti-type')
         
         # model (parameter) related
-        self.parser.add_argument('--dropout-rate', default=0.0, type=float, help='Dropout rate')
         self.parser.add_argument('--sche-samp-rate', default=0.0, type=float, help='scheduled sampling rate')
         self.parser.add_argument('--sche-samp-final-rate', default=0.6, type=float, help='scheduled sampling final rate')
-        self.parser.add_argument('--sche-samp-start-iter', default=5, type=int, help='scheduled sampling start epoch')
-        self.parser.add_argument('--sche-samp-final_iter', default=15, type=int, help='scheduled sampling start epoch')
+        self.parser.add_argument('--sche-samp-start-epoch', default=5, type=int, help='scheduled sampling start epoch')
+        self.parser.add_argument('--sche-samp-final_epoch', default=15, type=int, help='scheduled sampling start epoch')
         
          # rnnlm related         
         self.parser.add_argument('--model-unit', type=str, default='char', choices=['char', 'word', 'syllable'], help='model_unit')
@@ -139,16 +179,15 @@ class BaseOptions():
         if not self.initialized:
             self.initialize()
         self.opt = self.parser.parse_args()
-        if(self.opt.config_file != None):
-            for config_file in self.opt.config_file:
-                with open(config_file,encoding = 'utf-8') as f:
+        if self.opt.config_file != None:
+            for config_file in  self.opt.config_file:
+                with open(config_file,encoding = "utf-8") as f:
                     data_file = f.read()
                 data = yaml.full_load(data_file)
                 for key_d,val_d in data.items():
                     key_d = key_d.replace("--","")
                     key_d = key_d.replace("-","_")
-                    setattr(self.opt,key_d,val_d)
-
+                    setattr(self.opt,key_d,val_d)   
         str_ids = self.opt.gpu_ids.split(',')
         self.opt.gpu_ids = []
         for str_id in str_ids:
@@ -172,7 +211,7 @@ class BaseOptions():
 
         # save to the disk
         #exp_path = os.path.join(self.opt.checkpoints_dir, self.opt.name)
-        #utils.mkdirs(self.opt.exp_path)
+        utils.mkdirs(self.opt.exp_path)
         #self.opt.exp_path = self.opt.exp_path
         if self.opt.name != '':
             file_name = os.path.join(self.opt.checkpoints_dir,self.opt.name, 'opt.txt')

@@ -14,7 +14,7 @@ import torch
 import fake_opt
 from rewav import rewav
 
-from options.test_options import TestOptions
+from conformer_options.test_conformer_options import Test_conformer_Options
 from model.feat_model import FFTModel, FbankModel
 from e2e_asr_conformer import E2E
 from model.enhance_model import EnhanceModel
@@ -27,7 +27,7 @@ from utils import utils
 
 def str2bool(sr1):
     return True if sr1.lower() == 'true' else False
-opt = TestOptions().parse()
+opt = Test_conformer_Options().parse()
 if opt.recog_dir == '':
     opt = fake_opt.joint_recog_conformer()
 manualSeed = random.randint(1, 10000)
@@ -167,7 +167,9 @@ def main():
     else:
         rnnlm = None
         fstlm = None
-    if opt.MCT:
+    if opt.joint_resume != None:
+        fbank_cmvn_file = os.path.join(opt.exp_path, 'enhance_cmvn.npy')
+    elif opt.MCT:
         fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_mct_cmvn.npy')
     else:
         fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')

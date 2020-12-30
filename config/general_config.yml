@@ -1,0 +1,6 @@
+lmtype: "rnnlm"
+funsion: None
+rnnlm: "checkpoints_test/train_rnnlm/rnnlm.model.best"
+num_workers: 8
+fbank_dim: 80
+gpu_ids: "0"

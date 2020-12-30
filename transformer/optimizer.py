@@ -12,10 +12,10 @@ import torch
 class NoamOpt(object):
     """Optim wrapper that implements rate."""
 
-    def __init__(self, model_size, factor, warmup, optimizer):
+    def __init__(self, model_size, factor, warmup, optimizer,step = 0):
         """Construct an NoamOpt object."""
         self.optimizer = optimizer
-        self._step = 0
+        self._step = step
         self.warmup = warmup
         self.factor = factor
         self.model_size = model_size

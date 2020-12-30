@@ -1,9 +1,9 @@
-from .base_options import BaseOptions
+from .base_conformer_options import Base_conformer_Options
 
 
-class TestOptions(BaseOptions):
+class Test_conformer_Options(Base_conformer_Options):
     def initialize(self):
-        BaseOptions.initialize(self)
+        Base_conformer_Options.initialize(self)
         
         # task related
         self.parser.add_argument('--recog-dir', type=str, default = '',help='Filename of recognition feature data (Kaldi scp)')

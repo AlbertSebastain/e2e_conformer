@@ -13,7 +13,7 @@ import logging
 import torch
 import fake_opt
 
-from options.test_options import TestOptions
+from conformer_options.test_conformer_options import Test_conformer_Options
 from model.feat_model import FFTModel, FbankModel
 from e2e_asr_conformer import E2E
 from model import lm, extlm, fsrnn
@@ -22,7 +22,7 @@ from data.data_loader import SequentialDataset, SequentialDataLoader, BucketingS
 from utils.visualizer import Visualizer 
 from utils import utils
 from char_error_rate import char_error
-opt = TestOptions().parse()
+opt = Test_conformer_Options().parse()
 if opt.recog_dir == '':
     opt = fake_opt.asr_recog_conf()
 manualSeed = random.randint(1, 10000)

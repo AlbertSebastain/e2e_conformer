@@ -108,12 +108,12 @@ def make_feature(wav_path_list, noise_wav_list, feat_dir, thread_num, argument=F
 
         
 def main():
-    data_dir = "/usr/home/shi/projects/data_aishell/data/test"
-    feat_dir = data_dir
-    #data_dir = sys.argv[1]
-    #feat_dir = sys.argv[2]
-    #noise_repeat_num = int(sys.argv[3])
-    noise_repeat_num = 1
+    #data_dir = "/usr/home/shi/projects/data_aishell/data/test"
+    #feat_dir = data_dir
+    data_dir = sys.argv[1]
+    feat_dir = sys.argv[2]
+    noise_repeat_num = int(sys.argv[3])
+    #noise_repeat_num = 1
     
     clean_feat_dir = os.path.join(feat_dir, 'clean')
     if not os.path.exists(clean_feat_dir):

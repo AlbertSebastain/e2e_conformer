@@ -1,0 +1,7 @@
+checkpoints_dir=./checkpoints_test
+dataroot=/usr/home/shi/projects/data_aishell_test/data
+exp_root=/usr/home/shi/projects/e2e_speech_project/data_model_test
+dictroot=/usr/home/shi/projects/data_aishell_test/data/lang/phones
+lmexpdir=./checkpoints_test/train_rnnlm
+dict=/usr/home/shi/projects/data_aishell_test/data/lang/phones/train_units.txt
+embed_init_file=/usr/home/shi/projects/data_aishell_test/data/lang/phones/sgns

@@ -29,8 +29,9 @@ torch.cuda.manual_seed(manualSeed)
                                                      
 def main():
     #logging.basicConfig(filename = './traine2e/train.log',level=logging.INFO, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
-    opt = fake_opt.Asr_train()
-    #opt = TrainOptions().parse()
+    opt = TrainOptions().parse()
+    if opt.exp_path == None:
+        opt = fake_opt.Asr_train()
         
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
      

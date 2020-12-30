@@ -1,0 +1,6 @@
+ndf: 32
+netD_type: "n_layers"
+gan_loss_lambda: 2
+mtlalpha: 0.5
+enhance_loss_lambda: 5
+isGan: True

@@ -13,6 +13,7 @@ from tqdm import tqdm
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+from conformer_options.train_conformer_options import Train_conformer_Options
 import pandas as pd
 import fake_opt
 
@@ -57,30 +58,32 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     
          
 def main():    
-    #opt = TrainOptions().parse()   
-    #if opt.exp_path == None:
-    opt = fake_opt.conf_joint_train() 
-    opt.name = sys.argv[1]
-    temp_root = '/usr/home/shi/projects/e2e_speech_project/data_model'
-    opt.exp_path = os.path.join(temp_root,opt.name)
-    opt.works_dir = opt.exp_path
+    opt = Train_conformer_Options().parse()   
+    if opt.exp_path == None:
+        opt = fake_opt.conf_joint_train() 
+    #opt.name = sys.argv[1]
+    #temp_root = '/usr/home/shi/projects/e2e_speech_project/data_model'
+    #opt.exp_path = os.path.join(temp_root,opt.name)
+    #opt.works_dir = opt.exp_path
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
      
     visualizer = Visualizer(opt)  
     logging = visualizer.get_logger()
     acc_report = visualizer.add_plot_report(['train/acc', 'val/acc'], 'acc.png')
+    if opt.isGAN:
+        loss_report = visualizer.add_plot_report(['train/loss', 'val/loss', 'train/gan_loss', 'train/enhance_loss','val/enhance_loss','train/loss_D'], 'loss.png')
     loss_report = visualizer.add_plot_report(['train/loss', 'val/loss', 'train/enhance_loss', 'val/enhance_loss'], 'loss.png')
      
     # data
     logging.info("Building dataset.")
-    #train_data = opt.train_folder
-    #dev_data = opt.dev_folder
-    train_data = sys.argv[2]
-    dev_data = sys.argv[3]
+    train_data = opt.train_folder
+    dev_data = opt.dev_folder
+    #train_data = sys.argv[2]
+    #dev_data = sys.argv[3]
     if 'mct' in opt.name:
-        opt.MCT = False
-    else:
         opt.MCT = True
+    else:
+        opt.MCT = False
     train_dataset = MixSequentialDataset(opt, os.path.join(opt.dataroot, train_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = train_data)
     val_dataset   = MixSequentialDataset(opt, os.path.join(opt.dataroot, dev_data), os.path.join(opt.dict_dir, 'train_units.txt'),type_data = dev_data)
     train_sampler = BucketingSampler(train_dataset, batch_size=opt.batch_size) 
@@ -105,17 +108,12 @@ def main():
     enhance_model_path = None
     if (opt.enhance_resume != None) & (opt.joint_resume == None):
         enhance_model_path = os.path.join(opt.works_dir, opt.enhance_resume)
+        asr_model_path = os.path.join(opt.works_dir,opt.asr_resume)
         if os.path.isfile(enhance_model_path):
             enhance_model = EnhanceModel.load_model(enhance_model_path, 'enhance_state_dict', opt)
-        else:
-            print("no checkpoint found at {}".format(enhance_model_path))     
-    
-    asr_model_path = None
-    if (opt.asr_resume != None) & (opt.joint_resume == None):
-        asr_model_path = os.path.join(opt.works_dir, opt.asr_resume)
-        if os.path.isfile(asr_model_path):
             #asr_model = ShareE2E.load_model(asr_model_path, 'asr_state_dict', opt)
             asr_model = E2E.load_model(asr_model_path,'asr_state_dict',opt)
+            feat_model = FbankModel.load_model(asr_model_path, 'fbank_state_dict', opt)  
             package = torch.load(asr_model_path, map_location=lambda storage, loc: storage)
             step = int(package.get('iters',0))-1
         else:
@@ -125,6 +123,9 @@ def main():
     if opt.joint_resume != None:
         joint_model_path = os.path.join(opt.works_dir, opt.joint_resume)
         if os.path.isfile(joint_model_path):
+            enhance_model = EnhanceModel.load_model(joint_model_path, 'enhance_state_dict', opt)
+            asr_model = E2E.load_model(joint_model_path,'asr_state_dict',opt)      
+            feat_model = FbankModel.load_model(joint_model_path, 'fbank_state_dict', opt)   
             package = torch.load(joint_model_path, map_location=lambda storage, loc: storage)
             lr = package.get('lr', opt.lr)
             eps = package.get('eps', opt.eps)  
@@ -132,17 +133,13 @@ def main():
             best_loss = package.get('best_loss', float('inf'))
             start_epoch = int(package.get('epoch', 0))   
             iters = int(package.get('iters', 0)) - 1   
+            step = int(package.get('iters', 0)) - 1
             print('joint_model_path {} and iters {}'.format(joint_model_path, iters))        
             ##loss_report = package.get('loss_report', loss_report)
             ##visualizer.set_plot_report(loss_report, 'loss.png')
         else:
             print("no checkpoint found at {}".format(joint_model_path))
-    if joint_model_path is not None or enhance_model_path is None:     
-        enhance_model = EnhanceModel.load_model(joint_model_path, 'enhance_state_dict', opt)    
-    if joint_model_path is not None or asr_model_path is None:  
-        #asr_model = ShareE2E.load_model(joint_model_path, 'asr_state_dict', opt) 
-        asr_model = E2E.load_model(asr_model_path,'asr_state_dict',opt)    
-    feat_model = FbankModel.load_model(joint_model_path, 'fbank_state_dict', opt) 
+
     if opt.isGAN:
         if joint_model_path != None:
             gan_model = GANModel.load_model(joint_model_path, 'gan_state_dict', opt)

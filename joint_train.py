@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import pandas as pd
 import fake_opt
 
-#from options.train_options import TrainOptions
+from options.train_options import TrainOptions
 from model.enhance_model import EnhanceModel
 from model.feat_model import FFTModel, FbankModel
 #from model.e2e_model import ShareE2E
@@ -56,26 +56,29 @@ def compute_cmvn_epoch(opt, train_loader, enhance_model, feat_model):
     
          
 def main():    
-    #opt = TrainOptions().parse()   
-    #if opt.exp_path == None:
-    opt = fake_opt.joint_train() 
-    opt.name = sys.argv[1]
-    temp_root = '/usr/home/shi/projects/e2e_speech_project/data_model'
-    opt.exp_path = os.path.join(temp_root,opt.name)
-    opt.works_dir = opt.exp_path
+    opt = TrainOptions().parse()   
+    if opt.exp_path == None:
+        opt = fake_opt.joint_train() 
+    #opt.name = sys.argv[1]
+    #temp_root = '/usr/home/shi/projects/e2e_speech_project/data_model'
+    #opt.exp_path = os.path.join(temp_root,opt.name)
+    #opt.works_dir = opt.exp_path
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
      
     visualizer = Visualizer(opt)  
     logging = visualizer.get_logger()
     acc_report = visualizer.add_plot_report(['train/acc', 'val/acc'], 'acc.png')
-    loss_report = visualizer.add_plot_report(['train/loss', 'val/loss', 'train/enhance_loss', 'val/enhance_loss'], 'loss.png')
-     
+
+    if opt.isGAN:
+        loss_report = visualizer.add_plot_report(['train/loss', 'val/loss', 'train/gan_loss','train/enhance_loss', 'val/enhance_loss', 'train/loss_D'], 'loss.png')
+    else:
+        loss_report = visualizer.add_plot_report(['train/loss', 'val/loss', 'train/enhance_loss', 'val/enhance_loss'], 'loss.png')
     # data
     logging.info("Building dataset.")
-    #train_data = opt.train_folder
-    #dev_data = opt.dev_folder
-    train_data = sys.argv[2]
-    dev_data = sys.argv[3]
+    train_data = opt.train_folder
+    dev_data = opt.dev_folder
+    #train_data = sys.argv[2]
+    #dev_data = sys.argv[3]
     if 'mct' in opt.name:
         opt.MCT = True
     else:
@@ -176,7 +179,19 @@ def main():
         fbank_path = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
     else:
         fbank_path = os.path.join(opt.exp_path,'fbank_cmvn.npy')
-    fbank_cmvn = np.load(fbank_path)
+    if os.path.isfile(fbank_path):
+
+        fbank_cmvn = np.load(fbank_path)
+    else:
+        for i, (data) in enumerate(train_loader, start=0):
+            utt_ids, spk_ids, clean_inputs, clean_log_inputs, mix_inputs, mix_log_inputs, cos_angles, targets, input_sizes, target_sizes,clean_angels,mix_angles,cmvn = data
+            fbank_cmvn = feat_model.compute_cmvn(clean_inputs, input_sizes)
+            if feat_model.cmvn_processed_num >= feat_model.cmvn_num:
+                #if fbank_cmvn is not None:
+                fbank_cmvn = feat_model.compute_cmvn(clean_inputs, input_sizes)
+                np.save(fbank_path, fbank_cmvn)
+                print('save fbank_cmvn to {}'.format(fbank_path))
+                break
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
     #fbank_cmvn = fbank_model.compute_cmvn(inputs, input_sizes)
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
