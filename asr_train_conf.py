@@ -11,18 +11,14 @@ import torch.optim as optim
 import os
 import torch.nn.functional as F
 from data.data_loader import SequentialDataset, SequentialDataLoader,BucketingSampler
-#from data.dataset import CleanDataset, DataSampler, CleanDataLoader
 
 from utils.visualizer import Visualizer
 from utils.utils import ScheSampleRampup, save_checkpoint, adadelta_eps_decay
 from tqdm import tqdm
-#import config
 
 from transformer.optimizer import NoamOpt
 from transformer.nets_utils import pad_list
-#from transformer.e2e_asr_transformer import E2E
 from e2e_asr_conformer import E2E
-#from config_transformer import TrainOptions
 from conformer_options.train_conformer_options import Train_conformer_Options
 import fake_opt
 from model.feat_model import FbankModel
@@ -34,11 +30,9 @@ torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
 
 def train():
-    # step0: 导入参数，cuda 和 logging
     opt = Train_conformer_Options().parse()
-    if(opt.name == ''):
+    if opt.name == '':
         opt = fake_opt.asr_conf()
-    #opt = fake_opt.asr_transf()
 
     device = torch.device("cuda:{}".format(opt.gpu_ids[0]) if len(opt.gpu_ids) > 0 and torch.cuda.is_available() else "cpu")
 
@@ -64,7 +58,6 @@ def train():
     logging.info("#output dims: " + str(opt.odim))
     logging.info("Dataset ready!")
 
-    # step2： 模型
     #asr_model = E2E(opt.idim, opt.odim, opt)
     asr_model = E2E(opt)
     fbank_model = FbankModel(opt)
@@ -77,7 +70,6 @@ def train():
     model_path = None
     # convert to cuda
     #fbank_model.cuda()
-    # step3: 目标函数和优化器 Setup an optimizer
     if opt.resume:
         model_path = os.path.join(opt.works_dir, opt.resume)
         if os.path.isfile(model_path):
@@ -128,41 +120,23 @@ def train():
                 print('save fbank_cmvn to {}'.format(fbank_cmvn_file))
                 break
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
-    # 训练opt.epochs
     for epoch in range(start_epoch, opt.epochs):
-        # 对epoch进行shuffle
         if epoch > opt.shuffle_epoch:
             print(">> Shuffling batches for the following epochs")
             train_sampler.shuffle(epoch)
         for i, (data) in enumerate(train_loader, start=(iters * opt.batch_size) % len(train_dataset)):
-            # 训练模型参数
             utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
             fbank_features = fbank_model(inputs, fbank_cmvn)
-            # ys = []
-            # offset = 0
-            # for size in target_sizes:
-            #     ys.append(targets[offset : offset + size])
-            #     offset += size
-            # targets = pad_list(ys, asr_model.ignore_id)
-            # 计算loss
 
             loss, acc = asr_model(fbank_features, input_sizes, targets,target_sizes)
-
-            # for l in optimizer.optimizer.param_groups:
-            #     r = l['lr']
-            #     print(r)
-
-            #loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
             optimizer.zero_grad()  # Clear the parameter gradients
             loss.backward()  # compute backwards
-            #  梯度裁剪是根据参数的范数来衡量的
             grad_norm = torch.nn.utils.clip_grad_norm_(asr_model.parameters(), opt.grad_clip)
             if math.isnan(grad_norm):
                 logging.warning(">> grad norm is nan. Do not update model.")
             else:
                 optimizer.step()
 
-            # 更新统计指标以及可视化
             iters += 1
             errors = {
                 "train/loss": loss.item(),
@@ -187,33 +161,15 @@ def train():
                 }
                 filename = "latest"
                 save_checkpoint(state, opt.exp_path, filename=filename)
-                # for name, parms in asr_model.named_parameters():	
-                #     logging.info('name'+str(name))
-                #     logging.info('parms')
-                #     logging.info(parms[0:2])
-                #     logging.info('grad')
-                #     logging.info(parms.grad[0:2])
-                #     break
-                # for op in optimizer.param_groups:
-                #     logging.info('lr = {}'.format(op['lr']))
             # evalutation
             if iters % opt.validate_freq == 0:
-                #sche_samp_rate = sample_rampup.update(iters)
-                #print("iters {} sche_samp_rate {}".format(iters, sche_samp_rate))
                 asr_model.eval()
                 torch.set_grad_enabled(False)
-                # num_saved_attention = 0
                 pbar = tqdm(total=len(val_dataset))
                 for i, (data) in enumerate(val_loader, start=0):
                     utt_ids, spk_ids, inputs, log_inputs, targets, input_sizes, target_sizes = data
 
                     fbank_features = fbank_model(inputs, fbank_cmvn)
-                    # ys = []
-                    # offset = 0
-                    # for size in target_sizes:
-                    #     ys.append(targets[offset : offset + size])
-                    #     offset += size
-                    # targets = pad_list(ys, asr_model.ignore_id)
                     loss,acc = asr_model(fbank_features, input_sizes, targets,target_sizes)
                     #loss = opt.mtlalpha * loss_ctc + (1 - opt.mtlalpha) * loss_att
                     errors = {
@@ -222,23 +178,6 @@ def train():
                     }
                     visualizer.set_current_errors(errors)
                     pbar.update(opt.batch_size)
-                    # if opt.num_save_attention > 0 and opt.mtlalpha != 1.0:
-                    #     if num_saved_attention < opt.num_save_attention:
-                    #         att_ws = asr_model.calculate_all_attentions(
-                    #             inputs,
-                    #             input_sizes,
-                    #             targets,
-                    #         )
-                    #         for x in range(len(utt_ids)):
-                    #             att_w = att_ws[x]
-                    #             utt_id = utt_ids[x]
-                    #             file_name = "{}_ep{}_it{}.png".format(utt_id, epoch, iters)
-                    #             dec_len = int(target_sizes[x])
-                    #             enc_len = int(input_sizes[x])
-                    #             visualizer.plot_attention(att_w, dec_len, enc_len, file_name)
-                    #             num_saved_attention += 1
-                    #             if num_saved_attention >= opt.num_save_attention:
-                    #                 break
                 pbar.close()
                 asr_model.train()
                 torch.set_grad_enabled(True)
@@ -255,7 +194,7 @@ def train():
                         #opt.eps = adadelta_eps_decay(optimizer, opt.eps_decay)  # Epsilon constant for optimizer
                     else:
                         filename = "model.acc.best"
-                    best_acc = max(best_acc, val_acc)  # 找最佳的acc
+                    best_acc = max(best_acc, val_acc) 
                     logging.info("best_acc {}".format(best_acc))
                 elif opt.criterion == "loss":
                     if val_loss > best_loss:

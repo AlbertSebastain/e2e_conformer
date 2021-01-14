@@ -17,7 +17,6 @@ from options.train_options import TrainOptions
 from model.e2e_model import E2E
 from model.feat_model import FbankModel
 from data.data_loader import SequentialDataset, SequentialDataLoader,BucketingSampler
-#from data. import BucketingSampler
 from utils.visualizer import Visualizer 
 from utils import utils
 import fake_opt
@@ -28,7 +27,6 @@ torch.manual_seed(manualSeed)
 torch.cuda.manual_seed(manualSeed) 
                                                      
 def main():
-    #logging.basicConfig(filename = './traine2e/train.log',level=logging.INFO, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
     opt = TrainOptions().parse()
     if opt.exp_path == None:
         opt = fake_opt.Asr_train()
@@ -107,9 +105,6 @@ def main():
         fbank_cmvn_file = os.path.join(opt.exp_path,'fbank_mct_cmvn.npy')
     else:
         fbank_cmvn_file = os.path.join(opt.exp_path, 'fbank_cmvn.npy')
-    # data 不存在 input_sizes output_sizes, 不能load。 在后面计算cmvn需要用到，没法用。fbank_cmvn 不存在，需要建立，但是之前在数据sequen 时计算的cmvn 为什么不能用
-    # train 和test 都存在 /exp_path 叫 cmvn.npy 会不会覆盖。 text_char存哪个
-    # 原先注释
     if os.path.exists(fbank_cmvn_file):
         fbank_cmvn = np.load(fbank_cmvn_file)
     else:
@@ -123,7 +118,6 @@ def main():
                 print('save fbank_cmvn to {}'.format(fbank_cmvn_file))
                 break
     fbank_cmvn = torch.FloatTensor(fbank_cmvn)
-    # 注释到此
                      
     for epoch in range(start_epoch, opt.epochs):
         if epoch > opt.shuffle_epoch:

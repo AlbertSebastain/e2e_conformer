@@ -60,8 +60,6 @@ config_file_asr=./config/att_spec.yml
 train_file=${dataroot}/${train_set}
 test_file=${dataroot}/${test_set}
 dev_file=${dataroot}/${dev_set} 
-# exp tag
-tag="" # tag for managing experiments.
 
 . utils/parse_options.sh || exit 1;
 . ./cmd.sh
