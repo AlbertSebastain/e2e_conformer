@@ -1,6 +1,0 @@
-# general options
-checkpoints_dir: checkpoints_new
-name: test_conformer
-exp_path: data_model/test_conformer
-train_folder: mix_train_clean_match
-dev_folder: mix_train_clean_match
