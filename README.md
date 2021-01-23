@@ -3,9 +3,9 @@ The repository implements an ASR framework. We proposed a joint training network
 ## Requirements
 python 3,5 Pytorch 0.4.0
 ### Data
-For evaluation the performance of the model, we use  AISHELL-1 to train and test the model, which is a Mandarin corpus. You can download the [AISHELL-1][http://www.aishelltech.com/kysjcp] online.  
-For training the enhancement network, we use [NOISE-92][http://spib.linse.ufsc.br/noise.html] as the background noise.  
-For language model training, we use a pretrained open source chinese embeding vectors[https://github.com/Embedding/Chinese-Word-Vectors] as our initial embeding vectors in the language model. 
+For evaluation the performance of the model, we use  AISHELL-1 to train and test the model, which is a Mandarin corpus. You can download the [AISHELL-1](http://www.aishelltech.com/kysjcp) online.  
+For training the enhancement network, we use [NOISE-92](http://spib.linse.ufsc.br/noise.html) as the background noise.  
+For language model training, we use a pretrained [open source chinese embeding vectors](https://github.com/Embedding/Chinese-Word-Vectors) as our initial embeding vectors in the language model. 
 You can also use your own dataset. But the dataset must be splited into three parts train dev and test.   
 ## Framework
 ![joint_training](images/joint_trainoverview.png)
