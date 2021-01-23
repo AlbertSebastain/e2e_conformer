@@ -14,6 +14,6 @@ The End-to-End network estimate the posteriori probabilites for ouptut sequence.
 In the joint training, an additional discriminant network is connected with the enhancement network, and can guide the enhancement network training towards true clean signal.  
 ## run the framework
 you can run `run_att_model.sh` or `run_conformer_model` to train and test the model. The difference is different End-to-End network, RNN-Attention network or conformer model.  
-The configrations for training and test stages are saved in config folder.   
-You must change the some path directions in `run_att_model.sh` and `run_conformer_model`.
+The configrations for training and test stages are saved .yml files in config folder.   
+You must change some path directions in `run_att_model.sh` and `run_conformer_model`.
 
